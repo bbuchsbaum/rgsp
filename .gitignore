@@ -1,0 +1,42 @@
+# R build artifacts
+*.Rcheck/
+*.tar.gz
+*.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Local library
+.Rlib/
+
+# Python virtual environment
+.venv-pygsp/
+
+# Temporary/generated files
+.covr_result.rds
+.rcmdcheck_result.rds
+repomix-output.xml
+
+# oh-my-claudecode state
+.omc/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# pkgdown generated site
+docs/
+
+# C++ compilation artifacts
+src/*.o
+src/*.so
+src/*.dll
+src/*.bak
+
+# Generated plot files
+Rplots.pdf
+tests/testthat/Rplots.pdf

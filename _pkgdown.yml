@@ -1,0 +1,189 @@
+url: https://yourname.github.io/rgsp/
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+
+home:
+  title: "rgsp"
+  description: "Graph Signal Processing in R (PyGSP port)"
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, github]
+  components:
+    github:
+      icon: fa-github
+      aria-label: GitHub
+      href: https://github.com/yourname/rgsp
+
+reference:
+  - title: Graph Construction
+    desc: Create and manipulate graphs
+    contents:
+    - new_graph
+    - graph_ring
+    - graph_path
+    - graph_grid2d
+    - graph_grid3d
+    - graph_sensor
+    - graph_complete
+    - graph_sbm
+    - graph_erdos_renyi
+    - graph_barabasi_albert
+    - graph_random_regular
+    - graph_random_geometric
+
+  - title: Graph Properties
+    desc: Compute graph properties and operators
+    contents:
+    - graph_laplacian
+    - graph_degree
+    - graph_incidence
+    - graph_eigenpairs
+    - lambda_max
+    - graph_rescale
+    - graph_sparsify
+    - print.gsp_graph
+
+  - title: Spectral Analysis
+    desc: Graph Fourier Transform and spectral tools
+    contents:
+    - gft
+    - igft
+
+  - title: Filtering
+    desc: Spectral filtering and kernels
+    contents:
+    - filter_signal
+    - filter_signal_lanczos
+    - chebyshev_filter
+    - filter_bank_apply
+    - heat_propagate
+
+  - title: Spectral Kernels
+    desc: Filter kernel functions
+    contents:
+    - kernel_heat
+    - kernel_exponential
+    - kernel_mexican_hat
+    - kernel_meyer
+    - kernel_rectangle
+    - kernel_half_cosine
+    - kernel_gabor
+    - kernel_wave
+    - kernel_tight_band
+
+  - title: Wavelets
+    desc: Spectral graph wavelet transform
+    contents:
+    - sgwt
+    - isgwt
+    - sgwt_coeffs_at_scale
+    - sgwt_coeffs_tidy
+    - sgwt_atom
+    - sgwt_node_contribution
+    - sgwt_reconstruct_at
+    - band_energy_df
+    - wavelet_stat_map
+
+  - title: Wavelet Banks
+    desc: Pre-defined wavelet filter banks
+    contents:
+    - mexican_hat_wavelet_bank
+    - meyer_wavelet_bank
+    - wavelet_heat_bank
+    - wavelet_heat_transform
+    - tight_frame_bank
+    - tight_frame_regular
+    - tight_frame_held
+    - tight_frame_simoncelli
+    - tight_frame_papadakis
+    - gabor_filter_bank
+    - modulation_transform
+
+  - title: Frame Analysis
+    desc: Frame bounds and spectrogram
+    contents:
+    - compute_frame
+    - compute_spectrogram
+
+  - title: Optimization
+    desc: Regularization and denoising
+    contents:
+    - tikhonov_smooth
+    - tv_denoise
+    - tv_inpaint
+    - interpolate_laplacian
+
+  - title: Proximal Operators
+    desc: Building blocks for convex optimization
+    contents:
+    - prox_l1
+    - prox_box
+    - prox_tv1d
+    - proj_simplex
+    - proj_l2_ball
+
+  - title: Learning
+    desc: Semi-supervised learning on graphs
+    contents:
+    - regression_tikhonov
+    - classification_tikhonov
+
+  - title: Graph Reduction
+    desc: Coarsening and multiresolution
+    contents:
+    - kron_reduction
+    - graph_multiresolution
+    - graph_compress
+    - pyramid_analysis
+    - pyramid_synthesis
+    - random_lowpass_basis
+
+  - title: Differential Operators
+    desc: Gradient and divergence
+    contents:
+    - grad
+    - div
+    - compute_differential_operator
+
+  - title: Visualization
+    desc: Plotting functions (require ggplot2)
+    contents:
+    - graph_set_coords
+    - plot_graph
+    - plot_signal
+    - plot_filter_response
+    - plot_wavelet_coeffs
+    - plot_band_energy
+    - plot_spectrogram
+    - theme_gsp
+    - scale_signal
+    - scale_fill_gsp
+    - legend_position
+    - graph_title
+
+  - title: Cache Management
+    desc: Control caching behavior
+    contents:
+    - graph_cache_clear
+    - graph_cache_invalidate_spectra
+    - graph_cache_invalidate_struct
+    - cheby_cache_clear
+
+articles:
+  - title: Getting Started
+    navbar: ~
+    contents:
+    - getting-started
+
+  - title: Tutorials
+    navbar: Tutorials
+    contents:
+    - filters
+    - optimization
+
+news:
+  one_page: true

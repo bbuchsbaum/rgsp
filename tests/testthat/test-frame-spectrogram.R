@@ -1,0 +1,26 @@
+test_that("compute_frame exact matches Hutchinson on small graph", {
+  set.seed(123)
+  g <- graph_ring(6)
+  lmax <- lambda_max(g)
+  kernels <- list(k1 = kernel_heat(0.5), k2 = kernel_rectangle(0, lmax / 2))
+  exact <- compute_frame(g, kernels, method = "exact")
+  hutch <- compute_frame(g, kernels, method = "diag_hutch", R = 64, K = 40, jackson = TRUE)
+  expect_equal(length(exact$diag), g$n)
+  expect_equal(length(hutch$diag), g$n)
+  expect_equal(exact$A, min(exact$diag))
+  expect_equal(exact$B, max(exact$diag))
+  # Hutchinson should be reasonably close on average
+  expect_true(all(hutch$diag > 0))
+  expect_lt(abs(mean(hutch$diag) - mean(exact$diag)), 0.5)
+})
+
+test_that("compute_spectrogram returns per-scale energy", {
+  g <- graph_ring(8)
+  x <- rnorm(8)
+  scales <- c(0.5, 1.0)
+  S <- compute_spectrogram(g, x, scales, K = 20)
+  expect_equal(dim(S), c(8, 2))
+  expect_true(all(S >= 0))
+  colnames_ok <- all(colnames(S) == c("s_0.5", "s_1"))
+  expect_true(colnames_ok)
+})

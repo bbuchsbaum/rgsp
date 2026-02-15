@@ -1,0 +1,68 @@
+name: Benchmarks
+
+on:
+  # Run on releases
+  release:
+    types: [published]
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Benchmark mode'
+        required: true
+        default: 'quick'
+        type: choice
+        options:
+          - quick
+          - full
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libxml2-dev libssl-dev libcurl4-openssl-dev
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::bench
+            any::devtools
+          needs: check
+
+      - name: Install package
+        run: |
+          R CMD INSTALL .
+        shell: bash
+
+      - name: Run quick benchmarks
+        if: github.event_name == 'release' || github.event.inputs.mode == 'quick'
+        run: |
+          Rscript inst/bench/bench_all.R --quick
+        shell: bash
+
+      - name: Run full benchmarks
+        if: github.event.inputs.mode == 'full'
+        run: |
+          Rscript inst/bench/bench_all.R
+        shell: bash
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            inst/bench/results_*.csv
+            inst/bench/results_*.rds
+          if-no-files-found: ignore

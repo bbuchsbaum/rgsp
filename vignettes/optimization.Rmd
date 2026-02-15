@@ -1,0 +1,402 @@
+---
+title: "Optimization and Learning"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Optimization and Learning}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+```{r setup}
+library(rgsp)
+set.seed(42)
+```
+
+## Overview
+
+rgsp provides optimization algorithms for graph-based regularization:
+
+- **Tikhonov regularization**: Smooth solutions via Laplacian penalty
+- **Total variation**: Edge-preserving regularization
+- **Interpolation/Inpainting**: Recover missing values
+- **Proximal operators**: Building blocks for convex optimization
+- **Learning**: Regression and classification on graphs
+
+## Tikhonov Regularization
+
+Tikhonov smoothing minimizes:
+
+$$\min_x \|x - y\|^2 + \tau \cdot x^T L x$$
+
+where $L$ is the graph Laplacian and $\tau$ controls smoothness.
+
+```{r tikhonov-basic}
+# Create noisy signal on ring graph
+g <- graph_ring(100)
+x_true <- sin(seq(0, 2*pi, length.out = g$n))
+x_noisy <- x_true + rnorm(g$n, sd = 0.3)
+
+# Tikhonov smoothing
+x_smooth <- tikhonov_smooth(g, x_noisy, tau = 2)
+
+# Compare
+plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
+     main = "Tikhonov Smoothing")
+lines(x_true, col = "black", lwd = 2)
+lines(x_smooth, col = "blue", lwd = 2)
+legend("topright", c("Noisy", "True", "Smoothed"),
+       col = c("gray", "black", "blue"), lwd = c(NA, 2, 2), pch = c(16, NA, NA))
+```
+
+### Effect of Regularization Parameter
+
+```{r tikhonov-tau}
+taus <- c(0.1, 1, 5, 20)
+results <- sapply(taus, function(tau) tikhonov_smooth(g, x_noisy, tau = tau))
+
+par(mfrow = c(2, 2))
+for (i in seq_along(taus)) {
+  plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
+       main = paste("tau =", taus[i]))
+  lines(x_true, col = "black")
+  lines(results[, i], col = "blue", lwd = 2)
+}
+```
+
+## Total Variation Denoising
+
+TV denoising minimizes:
+
+$$\min_x \frac{1}{2}\|x - y\|^2 + \lambda \|Dx\|_1$$
+
+where $D$ is the graph gradient operator. TV preserves edges better than Tikhonov.
+
+```{r tv-denoise}
+# Create piecewise constant signal
+g <- graph_path(100)
+x_true <- c(rep(0, 30), rep(1, 40), rep(0, 30))
+x_noisy <- x_true + rnorm(g$n, sd = 0.2)
+
+# TV denoising
+x_tv <- tv_denoise(g, x_noisy, lambda = 1, maxit = 200)
+
+# Compare with Tikhonov
+x_tikh <- tikhonov_smooth(g, x_noisy, tau = 5)
+
+plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
+     main = "TV vs Tikhonov Denoising")
+lines(x_true, col = "black", lwd = 2)
+lines(x_tv, col = "red", lwd = 2)
+lines(x_tikh, col = "blue", lwd = 2, lty = 2)
+legend("topright", c("Noisy", "True", "TV", "Tikhonov"),
+       col = c("gray", "black", "red", "blue"),
+       lwd = c(NA, 2, 2, 2), lty = c(NA, 1, 1, 2), pch = c(16, NA, NA, NA))
+```
+
+### TV Parameters
+
+```{r tv-params}
+# Effect of lambda
+lambdas <- c(0.1, 0.5, 1, 2)
+tv_results <- sapply(lambdas, function(lam) {
+  tv_denoise(g, x_noisy, lambda = lam, maxit = 200)
+})
+
+par(mfrow = c(2, 2))
+for (i in seq_along(lambdas)) {
+  plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
+       main = paste("lambda =", lambdas[i]))
+  lines(x_true, col = "black")
+  lines(tv_results[, i], col = "red", lwd = 2)
+}
+```
+
+## Inpainting (Missing Value Recovery)
+
+### Laplacian Interpolation
+
+Recover missing values by minimizing the Laplacian quadratic form:
+
+```{r inpaint-laplacian}
+g <- graph_grid2d(10, 10)
+
+# Create signal with missing values
+x_true <- sin(seq(0, 2*pi, length.out = g$n))
+x_obs <- x_true
+missing_idx <- sample(g$n, 30)  # 30% missing
+x_obs[missing_idx] <- NA
+
+# Laplacian interpolation
+x_interp <- interpolate_laplacian(g, x_obs)
+
+cat("MSE on missing values:",
+    mean((x_interp[missing_idx] - x_true[missing_idx])^2), "\n")
+```
+
+### TV Inpainting
+
+TV inpainting preserves edges in the recovered signal:
+
+```{r inpaint-tv}
+# Piecewise constant signal
+x_true <- c(rep(0, 30), rep(1, 40), rep(0, 30))
+x_obs <- x_true
+x_obs[sample(100, 20)] <- NA  # 20% missing
+
+g <- graph_path(100)
+x_tv_inpaint <- tv_inpaint(g, x_obs, lambda = 0.5, maxit = 200)
+
+plot(x_true, type = "l", lwd = 2, main = "TV Inpainting")
+points(which(is.na(x_obs)), x_tv_inpaint[is.na(x_obs)], col = "red", pch = 16)
+legend("topright", c("True", "Recovered"), col = c("black", "red"),
+       lwd = c(2, NA), pch = c(NA, 16))
+```
+
+## Proximal Operators
+
+Building blocks for convex optimization algorithms:
+
+### L1 Proximal (Soft Thresholding)
+
+$$\text{prox}_{\lambda \|\cdot\|_1}(x) = \text{sign}(x) \max(|x| - \lambda, 0)$$
+
+```{r prox-l1}
+x <- seq(-2, 2, length.out = 100)
+y <- prox_l1(x, tau = 0.5)
+
+plot(x, x, type = "l", col = "gray", lty = 2,
+     main = "L1 Proximal (Soft Thresholding)")
+lines(x, y, col = "blue", lwd = 2)
+legend("topleft", c("Identity", "Soft threshold (tau=0.5)"),
+       col = c("gray", "blue"), lty = c(2, 1), lwd = c(1, 2))
+```
+
+### Box Constraint Projection
+
+```{r prox-box}
+x <- rnorm(10)
+y <- prox_box(x, lower = 0, upper = 1)
+cbind(x = x, projected = y)
+```
+
+### Simplex Projection
+
+Project onto the probability simplex:
+
+```{r proj-simplex}
+x <- c(-1, 0.5, 3, 2)
+y <- proj_simplex(x)
+cat("Input:", x, "\n")
+cat("Projected:", round(y, 4), "\n")
+cat("Sum:", sum(y), "\n")
+```
+
+### L2 Ball Projection
+
+```{r proj-l2}
+x <- c(3, 4)  # Norm = 5
+y <- proj_l2_ball(x, r = 2)
+cat("Input norm:", sqrt(sum(x^2)), "\n")
+cat("Projected norm:", sqrt(sum(y^2)), "\n")
+```
+
+### 1D Total Variation Proximal
+
+```{r prox-tv1d}
+x <- c(1, 1.1, 1.2, 5, 5.1, 5.2, 2, 2.1)
+y <- prox_tv1d(x, lambda = 1)
+plot(x, type = "b", pch = 16, main = "1D TV Proximal")
+lines(y, col = "blue", type = "b", pch = 17)
+legend("topright", c("Original", "TV proximal"), col = c("black", "blue"), pch = c(16, 17))
+```
+
+## Learning on Graphs
+
+### Tikhonov Regression
+
+Semi-supervised regression with graph regularization:
+
+```{r regression}
+g <- graph_sensor(100, seed = 42)
+
+# True smooth function on graph
+eig <- graph_eigenpairs(g)
+x_true <- eig$vectors[, 2]  # Second eigenvector (smooth)
+
+# Observe noisy values at subset of nodes
+obs_idx <- sample(g$n, 20)
+y_obs <- x_true[obs_idx] + rnorm(20, sd = 0.1)
+
+# Create observation vector (NA for unobserved)
+y <- rep(NA, g$n)
+y[obs_idx] <- y_obs
+
+# Regression
+x_pred <- regression_tikhonov(g, y, tau = 1)
+
+# Evaluate
+mse <- mean((x_pred - x_true)^2)
+cat("MSE:", round(mse, 6), "\n")
+```
+
+### Tikhonov Classification
+
+Semi-supervised classification:
+
+```{r classification}
+# Create SBM with probability matrix (high within-block, low between-block)
+P <- matrix(c(0.3, 0.02, 0.02,
+              0.02, 0.3, 0.02,
+              0.02, 0.02, 0.3), nrow = 3)
+g <- graph_sbm(c(30, 30, 40), P = P, seed = 42)
+
+# True labels (0, 1, 2 for three communities)
+labels_true <- c(rep(0, 30), rep(1, 30), rep(2, 40))
+
+# Observe labels at subset
+obs_idx <- c(sample(1:30, 5), sample(31:60, 5), sample(61:100, 5))
+labels_obs <- rep(NA, g$n)
+labels_obs[obs_idx] <- labels_true[obs_idx]
+
+# Classification
+labels_pred <- classification_tikhonov(g, labels_obs, tau = 0.1)
+
+# Accuracy
+accuracy <- mean(labels_pred == labels_true)
+cat("Accuracy:", round(accuracy * 100, 1), "%\n")
+```
+
+## Graph Coarsening
+
+### Kron Reduction
+
+Reduce graph size while preserving spectral properties:
+
+```{r kron}
+g <- graph_grid2d(6, 6)
+
+# Keep every other node
+keep_idx <- seq(1, g$n, by = 2)
+g_reduced <- kron_reduction(g, keep_idx)
+
+cat("Original nodes:", g$n, "\n")
+cat("Reduced nodes:", g_reduced$n, "\n")
+```
+
+### Multiresolution Pyramid
+
+Create a hierarchy of coarsened graphs:
+
+```{r multiresolution}
+g <- graph_sensor(100, seed = 42)
+
+# Create multiresolution hierarchy
+hier <- graph_multiresolution(g, levels = 3)
+
+cat("Levels:", length(hier$graphs), "\n")
+for (i in seq_along(hier$graphs)) {
+  cat("  Level", i, ":", hier$graphs[[i]]$n, "nodes\n")
+}
+```
+
+### Pyramid Transforms
+
+Analyze signals across resolutions:
+
+```{r pyramid}
+g <- graph_sensor(64, seed = 42)
+x <- rnorm(g$n)
+
+# Analysis: decompose into coarse + details (keep every other node)
+pyr <- pyramid_analysis(g, x)
+
+cat("Coarse signal length:", length(pyr$coarse), "values\n")
+cat("Detail signal length:", length(pyr$detail), "values\n")
+
+# Synthesis: reconstruct
+x_rec <- pyramid_synthesis(pyr)
+max(abs(x - x_rec))  # Perfect reconstruction
+```
+
+## Differential Operators
+
+### Gradient and Divergence
+
+```{r grad-div}
+g <- graph_grid2d(5, 5)
+x <- rnorm(g$n)
+
+# Gradient: maps node signal to edge signal
+grad_x <- grad(g, x)
+cat("Signal length:", length(x), "\n")
+cat("Gradient length:", length(grad_x), "\n")
+
+# Divergence: maps edge signal back to nodes
+div_grad_x <- div(g, grad_x)
+
+# div(grad(x)) = L * x (Laplacian)
+L <- graph_laplacian(g)
+Lx <- as.numeric(L %*% x)
+max(abs(div_grad_x - Lx))  # Should be ~0
+```
+
+### Differential Operator Matrix
+
+```{r diff-op}
+g <- graph_ring(10)
+D <- compute_differential_operator(g)
+dim(D)  # edges x nodes
+```
+
+## Performance Tips
+
+### Convergence Parameters
+
+```{r convergence}
+g <- graph_ring(100)
+x_noisy <- sin(seq(0, 2*pi, length.out = g$n)) + rnorm(100, sd = 0.3)
+
+# Adjust convergence for speed vs accuracy
+x_fast <- tv_denoise(g, x_noisy, lambda = 1, maxit = 50, tol = 1e-3)
+x_accurate <- tv_denoise(g, x_noisy, lambda = 1, maxit = 500, tol = 1e-6)
+
+cat("Fast iterations: 50, tol: 1e-3\n")
+cat("Accurate iterations: 500, tol: 1e-6\n")
+```
+
+### Warm Starting
+
+For multiple similar problems, use previous solution as initialization:
+
+```{r warm-start, eval=FALSE}
+# Not directly supported, but can be achieved by:
+# 1. Run with fewer iterations
+# 2. Use result as starting point for next problem
+```
+
+## Summary
+
+| Task | Function | Key Parameters |
+|------|----------|----------------|
+| Smoothing | `tikhonov_smooth()` | `tau` |
+| TV denoising | `tv_denoise()` | `lambda`, `maxit`, `tol` |
+| Interpolation | `interpolate_laplacian()` | - |
+| TV inpainting | `tv_inpaint()` | `lambda`, `maxit` |
+| Regression | `regression_tikhonov()` | `tau` |
+| Classification | `classification_tikhonov()` | `tau` |
+| Coarsening | `kron_reduction()` | `keep` |
+| Pyramid | `pyramid_analysis/synthesis()` | `levels` |
+
+## References
+
+- Shuman, D. I., et al. (2013). "The emerging field of signal processing on graphs." IEEE Signal Processing Magazine.
+- Hammond, D. K., et al. (2011). "Wavelets on graphs via spectral graph theory." Applied and Computational Harmonic Analysis.

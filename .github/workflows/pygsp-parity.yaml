@@ -1,0 +1,54 @@
+name: pygsp-parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  parity:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install system deps (macOS)
+        run: brew install llvm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Set up PyGSP venv
+        run: |
+          python -m venv .venv-pygsp
+          source .venv-pygsp/bin/activate
+          pip install -q --upgrade pip
+          pip install -q numpy scipy networkx pygsp==0.6.1
+        shell: bash
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::testthat
+            any::devtools
+            any::reticulate
+            any::Matrix
+            any::RSpectra
+          needs: tests
+
+      - name: Run parity + full testthat
+        env:
+          RETICULATE_PYTHON: ${{ github.workspace }}/.venv-pygsp/bin/python
+          R_LIBS_USER: ${{ github.workspace }}/.Rlib
+          R_LIBS: ${{ github.workspace }}/.Rlib
+        run: |
+          mkdir -p .Rlib
+          Rscript -e "devtools::test(stop_on_failure = TRUE)"

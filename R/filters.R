@@ -1,0 +1,523 @@
+# Filter kernels and Chebyshev-filtered application
+
+# internal cache for Chebyshev coefficients
+.cheby_cache <- new.env(parent = emptyenv())
+
+cheby_cache_key <- function(kernel, K, lmax, M, jackson) {
+  # Sample kernel at a few points to create unique fingerprint
+
+  # This captures closure environment variables that affect kernel behavior
+  test_lambdas <- c(0.1, 0.5, 1.0) * lmax
+  kernel_fingerprint <- paste(signif(kernel(test_lambdas), 8), collapse = ",")
+  paste(
+    K,
+    signif(lmax, 8),
+    M,
+    jackson,
+    kernel_fingerprint,
+    sep = "|"
+  )
+}
+
+#' Chebyshev coefficients for a spectral kernel
+#' @param kernel function of lambda
+#' @param K polynomial order (>=1)
+#' @param lmax spectral radius
+#' @param M oversampling points (default 2*K)
+#' @keywords internal
+cheby_coeffs <- function(kernel, K, lmax, M = NULL, jackson = FALSE, cache = TRUE) {
+  stopifnot(K >= 1, lmax > 0)
+  M <- M %||% (2 * K)
+  if (cache) {
+    key <- cheby_cache_key(kernel, K, lmax, M, jackson)
+    if (exists(key, envir = .cheby_cache, inherits = FALSE)) {
+      return(get(key, envir = .cheby_cache, inherits = FALSE))
+    }
+  }
+  n <- 0:(M - 1)
+  theta <- pi * (n + 0.5) / M
+  x <- cos(theta)              # in [-1,1]
+  lambdas <- (x + 1) * lmax / 2
+  f <- kernel(lambdas)
+  coeffs <- numeric(K)
+  for (k in 0:(K - 1)) {
+    c_k <- sum(f * cos(k * theta)) * 2 / M
+    if (k == 0) c_k <- c_k / 2
+    coeffs[k + 1] <- c_k
+  }
+  if (jackson) {
+    coeffs <- coeffs * jackson_weights(K)
+  }
+  if (cache) {
+    assign(key, coeffs, envir = .cheby_cache)
+  }
+  coeffs
+}
+
+# Jackson damping weights for Chebyshev series (first kind)
+# Non-negative, monotonically decreasing, enforce uniform convergence.
+# @keywords internal
+jackson_weights <- function(K) {
+  k <- 0:(K - 1)
+  N <- K + 1
+  w <- ((N - k) * cos(pi * k / N) + sin(pi * k / N) / tan(pi / N)) / N
+  as.numeric(w)
+}
+
+# Built-in kernels -----------------------------------------------------------
+
+#' Heat kernel exp(-t * lambda)
+#' @param t diffusion time
+#' @return kernel function
+#' @export
+kernel_heat <- function(t) {
+  force(t)
+  function(lambda) exp(-t * lambda)
+}
+
+#' Exponential kernel exp(- (lambda / alpha)^beta)
+#' @param alpha scale parameter
+#' @param beta shape parameter
+#' @return kernel function
+#' @export
+kernel_exponential <- function(alpha = 1, beta = 1) {
+  force(alpha); force(beta)
+  function(lambda) exp(- (pmax(lambda, 0) / alpha) ^ beta)
+}
+
+#' Mexican hat-like kernel lambda * exp(-lambda / sigma)
+#' @param sigma scale parameter
+#' @return kernel function
+#' @export
+kernel_mexican_hat <- function(sigma = 1) {
+  force(sigma)
+  function(lambda) lambda * exp(-lambda / sigma)
+}
+
+#' Gabor kernel exp(-(lambda-mu)^2 / (2 sigma^2))
+#' @param mu center frequency
+#' @param sigma bandwidth
+#' @return kernel function
+#' @export
+kernel_gabor <- function(mu, sigma) {
+  force(mu); force(sigma)
+  function(lambda) exp(- (lambda - mu)^2 / (2 * sigma^2))
+}
+
+#' Rectangular pass-band
+#' @param low lower cutoff frequency
+#' @param high upper cutoff frequency
+#' @return kernel function
+#' @export
+kernel_rectangle <- function(low, high) {
+  force(low); force(high)
+  function(lambda) as.numeric(lambda >= low & lambda <= high)
+}
+
+#' Half-cosine transition band kernel
+#' Smoothly transitions from 1 to 0 between low and high.
+#' @param low lower cutoff frequency
+#' @param high upper cutoff frequency
+#' @return kernel function
+#' @export
+kernel_half_cosine <- function(low, high) {
+  force(low); force(high)
+  function(lambda) {
+    y <- numeric(length(lambda))
+    y[lambda <= low] <- 1
+    inband <- lambda > low & lambda < high
+    y[inband] <- 0.5 * (1 + cos(pi * (lambda[inband] - low) / (high - low)))
+    y
+  }
+}
+
+#' Tight frame-style band kernel (PyGSP-style)
+#' Uses half-cosine for transition; lowpass to band to highpass coverage.
+#' @param low lower cutoff
+#' @param high upper cutoff
+#' @export
+kernel_tight_band <- function(low, high) {
+  force(low); force(high)
+  function(lambda) {
+    y <- numeric(length(lambda))
+    in1 <- lambda <= low
+    in2 <- lambda >= high
+    mid <- lambda > low & lambda < high
+    y[in1] <- 1
+    y[in2] <- 0
+    y[mid] <- cos(pi/2 * (lambda[mid] - low)/(high - low))
+    y
+  }
+}
+
+#' Wave (cosine) kernel for wave equation propagation
+#' h(lambda) = cos(t * sqrt(lambda))
+#' @param t time parameter
+#' @export
+kernel_wave <- function(t) {
+  force(t)
+  function(lambda) cos(t * sqrt(pmax(lambda, 0)))
+}
+
+# Filter banks / wavelets ----------------------------------------------------
+#' Smooth Meyer-like kernel (transition band)
+#' @param low low cutoff
+#' @param high high cutoff
+#' @export
+kernel_meyer <- function(low, high) {
+  force(low); force(high)
+  mid <- (low + high) / 2
+  width <- (high - low) / 2
+  sigma <- function(x) {
+    u <- (x - low) / (high - low)
+    u <- pmin(1, pmax(0, u))
+    u^4 * (35 - 84 * u + 70 * u^2 - 20 * u^3)
+  }
+  function(lambda) {
+    w <- abs(lambda - mid)
+    mask <- lambda <= low | lambda >= high
+    res <- numeric(length(lambda))
+    res[mask] <- 0
+    res[!mask] <- cos(pi / 2 * sigma(lambda[!mask]))
+    res
+  }
+}
+
+# Filter banks / wavelets ----------------------------------------------------
+
+#' Meyer wavelet bank (lowpass + bandpasses)
+#' @param scales multiplicative scales (e.g., 2^(0:J-1)), or a gsp_graph
+#' @param lmax spectral radius
+#' @param n_scales number of scales (if scales is NULL or a graph)
+#' @return list of kernel functions
+#' @export
+meyer_wavelet_bank <- function(scales = NULL, lmax = NULL, n_scales = NULL) {
+  # Accept a graph for convenience
+  if (inherits(scales, "gsp_graph")) {
+    g <- scales
+    scales <- NULL
+    if (is.null(lmax)) lmax <- lambda_max(g, normalized = g$normalized)
+  }
+  if (is.null(scales)) {
+    stopifnot(!is.null(lmax))
+    if (is.null(n_scales)) n_scales <- 6
+    # PyGSP-like default: dyadic down to roughly 4/(3*lmax)
+    scales <- (4 / (3 * lmax)) * 2 ^ seq(n_scales - 1, 0, by = -1)
+  }
+  scales <- sort(scales)
+  nb <- length(scales)
+  kernels <- vector("list", nb + 1)
+  # lowpass
+  low_cut <- lmax / max(scales) / 2
+  kernels[[1]] <- kernel_rectangle(0, low_cut)
+  for (i in seq_len(nb)) {
+    s <- scales[i]
+    low <- lmax / (2 * s)
+    high <- lmax / s
+    kernels[[i + 1]] <- kernel_meyer(low, high)
+  }
+  names(kernels) <- c("lowpass", paste0("band_", seq_len(nb)))
+  kernels
+}
+
+#' Mexican-hat wavelet bank
+#' @param scales scales vector, or a gsp_graph
+#' @param n_scales number of scales (if scales is a graph)
+#' @param lmax spectral radius
+#' @param lpfactor factor for low-frequency bound
+#' @return list of kernel functions
+#' @export
+mexican_hat_wavelet_bank <- function(scales, n_scales = NULL, lmax = NULL, lpfactor = 20) {
+  # Allow calling with a graph for PyGSP parity: mexican_hat_wavelet_bank(g, n_scales)
+  if (inherits(scales, "gsp_graph")) {
+    g <- scales
+    scales <- NULL
+    if (is.null(lmax)) {
+      lmax <- lambda_max(g, normalized = g$normalized)
+    }
+  }
+  if (is.null(scales)) {
+    stopifnot(!is.null(lmax), !is.null(n_scales))
+    lmin <- lmax / lpfactor
+    scales <- exp(seq(log(lmin), log(lmax), length.out = n_scales))
+  }
+  lapply(scales, function(s) kernel_mexican_hat(s))
+}
+
+#' Tight frame filter bank (lowpass + bandpasses)
+#'
+#' Creates a partition-of-unity filter bank using half-cosine / half-sine
+#' transitions at each edge.  For K+1 edges the bank contains K filters
+#' whose squared responses sum to 1 everywhere.
+#'
+#' @param edges monotone increasing vector of cutoff edges (len >=2)
+#' @export
+tight_frame_bank <- function(edges) {
+  stopifnot(length(edges) >= 2)
+  edges <- sort(edges)
+  K <- length(edges) - 1
+  kernels <- vector("list", K)
+  for (k in seq_len(K)) {
+    kernels[[k]] <- local({
+      kk <- k; KK <- K; ee <- edges
+      function(lambda) {
+        y <- numeric(length(lambda))
+        if (kk == 1L) {
+          # Lowpass: flat 1 below e[2], cos fall in [e[2], e[3]]
+          y[lambda <= ee[2]] <- 1
+          if (KK >= 2L) {
+            tr <- lambda > ee[2] & lambda < ee[3]
+            y[tr] <- cos(pi / 2 * (lambda[tr] - ee[2]) / (ee[3] - ee[2]))
+          }
+        } else if (kk == KK) {
+          # Highpass: sin rise in [e[K], e[K+1]], flat 1 above e[K+1]
+          tr <- lambda > ee[KK] & lambda < ee[KK + 1L]
+          y[tr] <- sin(pi / 2 * (lambda[tr] - ee[KK]) / (ee[KK + 1L] - ee[KK]))
+          y[lambda >= ee[KK + 1L]] <- 1
+        } else {
+          # Middle band: sin rise in [e[k], e[k+1]], cos fall in [e[k+1], e[k+2]]
+          lo <- ee[kk]; mid_e <- ee[kk + 1L]; hi <- ee[kk + 2L]
+          rise <- lambda > lo & lambda < mid_e
+          y[rise] <- sin(pi / 2 * (lambda[rise] - lo) / (mid_e - lo))
+          y[lambda == mid_e] <- 1
+          fall <- lambda > mid_e & lambda < hi
+          y[fall] <- cos(pi / 2 * (lambda[fall] - mid_e) / (hi - mid_e))
+        }
+        y
+      }
+    })
+  }
+  names(kernels) <- paste0("band_", seq_len(K))
+  kernels
+}
+
+#' Tight frame bank presets (Regular/Held/Simoncelli/Papadakis style)
+#' @param lmax spectral radius
+#' @param J number of dyadic bands
+#' @export
+tight_frame_regular <- function(lmax, J = 3) {
+  if (inherits(lmax, "gsp_graph")) {
+    lmax <- lambda_max(lmax, normalized = lmax$normalized)
+  }
+  edges <- lmax / 2 ^ seq(J, 0, by = -1)
+  tight_frame_bank(c(0, edges))
+}
+
+#' @rdname tight_frame_regular
+#' @export
+tight_frame_held <- function(lmax, J = 3) {
+  tight_frame_regular(lmax, J)
+}
+
+#' @rdname tight_frame_regular
+#' @export
+tight_frame_simoncelli <- function(lmax, J = 3) {
+  tight_frame_regular(lmax, J)
+}
+
+#' @rdname tight_frame_regular
+#' @export
+tight_frame_papadakis <- function(lmax, J = 3) {
+  tight_frame_regular(lmax, J)
+}
+
+# Filtering helpers ----------------------------------------------------------
+
+#' Apply a spectral kernel via Chebyshev approximation
+#' @param g graph
+#' @param signal vector or matrix (n x m)
+#' @param kernel function of lambda
+#' @param K Chebyshev order
+#' @param lmax optional precomputed lambda_max
+#' @param jackson logical; apply Jackson damping
+#' @param threads optional number of OpenMP threads
+#' @param precision numeric precision (currently only "double")
+#' @param strategy filtering strategy: "auto", "cheby", or "lanczos"
+#' @return filtered signal (vector or matrix)
+#' @export
+filter_signal <- function(g, signal, kernel, K = 30, lmax = NULL, jackson = FALSE,
+                          threads = NULL,
+                          precision = c("double"),
+                          strategy = c("auto", "cheby", "lanczos")) {
+  validate_signal_dims(g, signal)
+  if (is.null(dim(signal))) signal <- matrix(signal, ncol = 1)
+  precision <- match.arg(precision)
+  strategy <- match.arg(strategy)
+
+  lmax <- lmax %||% lambda_max(g, normalized = g$normalized)
+
+  # threads control
+  threads <- threads %||% getOption("rgsp.threads", NULL)
+  if (!is.null(threads)) {
+    set_omp_threads_cpp(as.integer(threads))
+  }
+
+  # Choose strategy
+  if (strategy == "auto") {
+    if (!jackson && K >= 60) strategy <- "lanczos" else strategy <- "cheby"
+  }
+
+  if (strategy == "lanczos") {
+    return(filter_signal_lanczos(g, signal, kernel, K = K))
+  }
+
+  coeffs <- cheby_coeffs(kernel, K = K, lmax = lmax, jackson = jackson)
+  L_sp <- g$cache$laplacian_sp
+  if (is.null(L_sp)) {
+    L <- graph_laplacian(g, g$normalized)
+    L_sp <- laplacian_sp_xptr_cpp(L)
+    g$cache$laplacian_sp <- L_sp
+  }
+  prec_flag <- if (precision == "float") 1L else 0L
+  out <- chebyshev_filter_omp_cpp(L_sp, signal, coeffs, lmax, threads = threads %||% -1L, precision = prec_flag)
+  if (ncol(out) == 1) drop(out) else out
+}
+
+#' Apply a spectral kernel via Lanczos approximation
+#'
+#' Approximates f(L) x using a K-step Lanczos tridiagonal projection.
+#' Typically more accurate than Chebyshev for ill-conditioned spectra.
+#'
+#' @param g graph
+#' @param signal vector or matrix (n x m)
+#' @param kernel function of eigenvalues
+#' @param K Lanczos steps (<= n)
+#' @export
+filter_signal_lanczos <- function(g, signal, kernel, K = 30) {
+  if (is.null(dim(signal))) signal <- matrix(signal, ncol = 1)
+  L <- graph_laplacian(g, normalized = g$normalized)
+  n <- nrow(L)
+  K <- min(as.integer(K), n)
+  res <- lanczos_filter_cpp(L, signal, K, kernel)
+  if (ncol(res) == 1) drop(res) else res
+}
+
+#' Apply a bank of kernels
+#' @param g graph
+#' @param signal vector or matrix
+#' @param kernels named list of kernel functions
+#' @param K Chebyshev order
+#' @param lmax optional spectral radius
+#' @param jackson logical; apply Jackson damping
+#' @return list of filtered signals (same order as kernels)
+#' @export
+filter_bank_apply <- function(g, signal, kernels, K = 30, lmax = NULL, jackson = FALSE) {
+  validate_signal_dims(g, signal)
+  lmax <- lmax %||% lambda_max(g, normalized = g$normalized)
+  lapply(kernels, function(kern) filter_signal(g, signal, kern, K = K, lmax = lmax, jackson = jackson))
+}
+
+# Wavelets -------------------------------------------------------------------
+
+#' Heat wavelet bank at given scales
+#' @param scales numeric vector of scales
+#' @export
+wavelet_heat_bank <- function(scales) {
+  lapply(scales, function(s) kernel_heat(s))
+}
+
+#' Compute heat wavelet transform
+#' @param g graph
+#' @param signal vector/matrix
+#' @param scales scales for heat kernels
+#' @param K Chebyshev order for filtering
+#' @param lmax optional spectral radius
+#' @param jackson logical; apply Jackson damping
+#' @return list of filtered signals, one per scale
+#' @export
+wavelet_heat_transform <- function(g, signal, scales, K = 30, lmax = NULL, jackson = FALSE) {
+  validate_signal_dims(g, signal)
+  bank <- wavelet_heat_bank(scales)
+  res <- filter_bank_apply(g, signal, bank, K = K, lmax = lmax, jackson = jackson)
+  names(res) <- paste0("scale_", scales)
+  res
+}
+
+#' Heat wavelet transform on a k-NN graph (convenience)
+#'
+#' Build a k-nearest-neighbor graph from coordinates and apply the heat wavelet
+#' transform in one step.
+#'
+#' @param coords numeric matrix of node coordinates (n x d)
+#' @param signal vector or matrix of signals (n x m)
+#' @param scales numeric vector of heat scales
+#' @param k neighbors per node (passed to [graph_knn()])
+#' @param weight weighting scheme for k-NN edges (`"heat"`, `"binary"`, `"distance"`)
+#' @param sigma optional bandwidth for `weight = "heat"`; defaults to median k-NN distance
+#' @param sym symmetrization mode for k-NN graph (`"union"` or `"mutual"`)
+#' @param normalized logical; compute normalized Laplacian
+#' @param seed optional RNG seed
+#' @param K Chebyshev order
+#' @param lmax optional spectral radius
+#' @param jackson logical; apply Jackson damping
+#'
+#' @return list of filtered signals, one per scale (as in [wavelet_heat_transform()])
+#' @export
+wavelet_heat_knn <- function(coords, signal, scales,
+                             k = 6,
+                             weight = c("heat", "binary", "distance"),
+                             sigma = NULL,
+                             sym = c("union", "mutual"),
+                             normalized = FALSE,
+                             seed = NULL,
+                             K = 30,
+                             lmax = NULL,
+                             jackson = FALSE) {
+  g <- graph_knn(coords,
+                 k = k,
+                 weight = weight,
+                 sigma = sigma,
+                 sym = sym,
+                 normalized = normalized,
+                 seed = seed)
+  wavelet_heat_transform(g, signal, scales = scales, K = K, lmax = lmax, jackson = jackson)
+}
+
+# Gabor / Modulation ---------------------------------------------------------
+
+#' Gabor filter bank
+#' @param mus center frequencies
+#' @param sigma bandwidth
+#' @export
+gabor_filter_bank <- function(mus, sigma) {
+  lapply(mus, function(mu) kernel_gabor(mu, sigma))
+}
+
+#' Modulation / Gabor vertex-frequency transform
+#' @param g graph
+#' @param signal vector or matrix (n x m)
+#' @param mus vector of center frequencies
+#' @param sigma bandwidth of gabor kernel
+#' @param K Chebyshev order
+#' @param lmax optional spectral radius
+#' @param jackson logical; use Jackson damping
+#' @return list of filtered signals (one per mu)
+#' @export
+modulation_transform <- function(g, signal, mus, sigma, K = 30, lmax = NULL, jackson = FALSE) {
+  bank <- gabor_filter_bank(mus, sigma)
+  filter_bank_apply(g, signal, bank, K = K, lmax = lmax, jackson = jackson)
+}
+
+# Diffusion / heat propagation ----------------------------------------------
+
+#' Heat diffusion of a signal for one or multiple times
+#' @param g graph
+#' @param signal vector/matrix
+#' @param t scalar or vector of times
+#' @param K Chebyshev order
+#' @param lmax optional spectral radius
+#' @return filtered signal(s), or list if multiple times
+#' @export
+heat_propagate <- function(g, signal, t, K = 30, lmax = NULL) {
+  times <- as.numeric(t)
+  lmax <- lmax %||% lambda_max(g, normalized = g$normalized)
+  out_list <- lapply(times, function(tt) {
+    filter_signal(g, signal, kernel_heat(tt), K = K, lmax = lmax)
+  })
+  if (length(times) == 1) {
+    out_list[[1]]
+  } else {
+    names(out_list) <- paste0("t_", times)
+    out_list
+  }
+}

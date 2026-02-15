@@ -1,0 +1,245 @@
+---
+title: "Getting Started with rgsp"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with rgsp}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+
+**rgsp** is an R package for Graph Signal Processing (GSP), providing tools to analyze and process signals defined on graphs. It is a port of the Python [PyGSP](https://pygsp.readthedocs.io/) library with C++ acceleration via RcppArmadillo.
+
+Key features:
+
+- **Graph construction**: Ring, path, grid, sensor networks, random graphs
+- **Spectral analysis**: Graph Fourier Transform (GFT), eigendecomposition
+- **Filtering**: Chebyshev polynomial approximation, various kernels
+- **Wavelets**: Spectral Graph Wavelet Transform (SGWT)
+- **Optimization**: Tikhonov regularization, total variation
+- **Visualization**: ggplot2-based plotting
+
+```{r setup}
+library(rgsp)
+```
+
+## Creating Graphs
+
+### Built-in Graph Types
+
+rgsp provides many graph constructors:
+```{r graphs}
+# Simple graphs
+g_ring <- graph_ring(20)
+g_path <- graph_path(20)
+g_grid <- graph_grid2d(5, 4)
+
+# Random graphs
+g_er <- graph_erdos_renyi(30, p = 0.2, seed = 42)
+g_sensor <- graph_sensor(50, seed = 42)
+
+# Structured graphs
+g_complete <- graph_complete(10)
+# SBM requires a probability matrix P (k x k for k communities)
+P <- matrix(c(0.5, 0.05, 0.05,
+              0.05, 0.5, 0.05,
+              0.05, 0.05, 0.5), nrow = 3)
+g_sbm <- graph_sbm(c(10, 10, 10), P = P, seed = 42)
+```
+
+### Graph Properties
+
+Each graph object contains:
+
+```{r properties}
+g <- graph_ring(10)
+g$n          # Number of nodes
+g$W[1:5, 1:5]  # Adjacency matrix (sparse)
+
+# Compute Laplacian
+L <- graph_laplacian(g)
+
+# Get node degrees
+deg <- graph_degree(g)
+print(deg)
+```
+
+## Signals on Graphs
+
+A graph signal is simply a vector with one value per node:
+
+```{r signals}
+g <- graph_ring(50)
+
+# Create a smooth signal
+x_smooth <- sin(seq(0, 2*pi, length.out = g$n))
+
+# Create a noisy signal
+set.seed(42)
+x_noisy <- x_smooth + rnorm(g$n, sd = 0.3)
+```
+
+## Graph Fourier Transform
+
+The GFT projects signals onto the graph's eigenvector basis:
+
+```{r gft}
+g <- graph_ring(32)
+x <- sin(seq(0, 4*pi, length.out = g$n))
+
+# Forward transform
+x_hat <- gft(g, x)
+
+# Inverse transform (perfect reconstruction)
+x_rec <- igft(g, x_hat)
+max(abs(x - x_rec))  # Should be ~0
+```
+
+## Filtering Signals
+
+### Heat Kernel Filter
+
+The heat kernel smooths signals on the graph:
+
+```{r filter-heat}
+g <- graph_ring(64)
+set.seed(42)
+x <- rnorm(g$n)  # Random signal
+
+# Apply heat filter (smoothing)
+y <- filter_signal(g, x, kernel_heat(t = 1.0), K = 30)
+
+# Compare
+plot(x, type = "l", col = "gray", main = "Heat Filtering")
+lines(y, col = "blue", lwd = 2)
+legend("topright", c("Original", "Filtered"), col = c("gray", "blue"), lwd = c(1, 2))
+```
+
+### Available Kernels
+
+```{r kernels, eval=FALSE}
+kernel_heat(tau)           # Heat diffusion: exp(-tau * lambda)
+kernel_exponential(tau)    # Exponential decay
+kernel_mexican_hat(sigma)  # Mexican hat wavelet
+kernel_rectangle(a, b)     # Band-pass [a, b]
+kernel_half_cosine(a, b)   # Smooth band-pass
+kernel_meyer(a, b)         # Meyer wavelet kernel
+```
+
+## Spectral Graph Wavelets
+
+The SGWT decomposes signals across multiple scales:
+
+```{r sgwt}
+g <- graph_sensor(100, seed = 42)
+set.seed(42)
+x <- rnorm(g$n)
+
+# Compute wavelet coefficients
+W <- sgwt(g, x, scales = 4)
+print(W)
+
+# Reconstruct signal
+x_rec <- isgwt(W)
+max(abs(x - x_rec))  # Perfect reconstruction
+```
+
+### Wavelet Energy Analysis
+
+```{r wavelet-energy}
+# Energy distribution across scales
+energy_df <- band_energy_df(W)
+print(energy_df)
+```
+
+## Visualization
+
+rgsp provides ggplot2-based plotting (requires ggplot2 installed):
+
+```{r plotting, eval=requireNamespace("ggplot2", quietly = TRUE)}
+library(ggplot2)
+
+# Create a graph with coordinates
+g <- graph_sensor(50, seed = 42)
+g <- graph_set_coords(g, "spring", seed = 123)
+
+# Plot graph structure
+plot_graph(g)
+```
+
+```{r plot-signal, eval=requireNamespace("ggplot2", quietly = TRUE)}
+# Plot signal on graph
+signal <- sin(g$coords[,1] * 3)  # Signal based on x-coordinate
+plot_signal(g, signal)
+```
+
+```{r plot-filter, eval=requireNamespace("ggplot2", quietly = TRUE)}
+# Plot filter responses
+kernels <- list(
+  Heat = kernel_heat(1),
+  Mexican = kernel_mexican_hat(1)
+)
+plot_filter_response(kernels, lmax = 4)
+```
+
+## Optimization
+
+### Tikhonov Smoothing
+
+```{r tikhonov}
+g <- graph_ring(50)
+set.seed(42)
+x_true <- sin(seq(0, 2*pi, length.out = g$n))
+x_noisy <- x_true + rnorm(g$n, sd = 0.3)
+
+# Smooth with Tikhonov regularization
+x_smooth <- tikhonov_smooth(g, x_noisy, tau = 2)
+
+# Compare MSE
+mse_noisy <- mean((x_noisy - x_true)^2)
+mse_smooth <- mean((x_smooth - x_true)^2)
+cat("MSE noisy:", round(mse_noisy, 4), "\n")
+cat("MSE smooth:", round(mse_smooth, 4), "\n")
+```
+### Total Variation Denoising
+
+```{r tv-denoise}
+# TV denoising preserves edges better than Tikhonov
+x_tv <- tv_denoise(g, x_noisy, lambda = 0.5, maxit = 100)
+mse_tv <- mean((x_tv - x_true)^2)
+cat("MSE TV:", round(mse_tv, 4), "\n")
+```
+
+## Performance Tips
+
+1. **Caching**: Eigenpairs and Chebyshev coefficients are cached automatically
+2. **Filter order K**: Higher K = more accurate but slower. K=30-50 usually sufficient
+3. **Sparse matrices**: rgsp uses sparse matrices throughout for efficiency
+4. **Clear caches** if memory is a concern:
+
+```{r caching, eval=FALSE}
+graph_cache_clear()
+cheby_cache_clear()
+```
+
+## Next Steps
+
+- See `vignette("filters")` for detailed filter and wavelet documentation
+- See `vignette("optimization")` for optimization algorithms
+- Check `?rgsp` for the full function reference
+
+## Session Info
+
+```{r session}
+sessionInfo()
+```
