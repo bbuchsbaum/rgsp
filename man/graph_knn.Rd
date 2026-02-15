@@ -8,9 +8,9 @@
 graph_knn(
   coords,
   k = 6,
-  weight = c("heat", "binary", "distance"),
+  weight = c("heat", "binary", "distance", "pygsp"),
   sigma = NULL,
-  sym = c("union", "mutual"),
+  sym = c("union", "mutual", "average"),
   normalized = FALSE,
   seed = NULL,
   eps = 1e-08
@@ -19,9 +19,9 @@ graph_knn(
 knn_graph(
   coords,
   k = 6,
-  weight = c("heat", "binary", "distance"),
+  weight = c("heat", "binary", "distance", "pygsp"),
   sigma = NULL,
-  sym = c("union", "mutual"),
+  sym = c("union", "mutual", "average"),
   normalized = FALSE,
   seed = NULL,
   eps = 1e-08
@@ -32,12 +32,12 @@ knn_graph(
 
 \item{k}{number of neighbors per node (clipped to \code{n-1})}
 
-\item{weight}{weighting scheme: \code{"heat"}, \code{"binary"}, or \code{"distance"}}
+\item{weight}{weighting scheme: \code{"heat"}, \code{"binary"}, \code{"distance"}, or \code{"pygsp"}}
 
 \item{sigma}{optional bandwidth for \code{weight = "heat"}; defaults to the median
 k-NN distance}
 
-\item{sym}{symmetrization mode: \code{"union"} (default) or \code{"mutual"}}
+\item{sym}{symmetrization mode: \code{"union"} (default), \code{"mutual"}, or \code{"average"}}
 
 \item{normalized}{logical; if TRUE compute normalized Laplacian}
 

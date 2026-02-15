@@ -27,6 +27,9 @@ new_graph <- function(adjacency, coords = NULL, normalized = FALSE, directed = F
 
   deg <- degree_cpp(adjacency)
   lap <- laplacian_cpp(adjacency, normalized = normalized, directed = directed)
+  cache_env <- new.env(parent = emptyenv())
+  cache_env$degree <- deg
+  cache_env[[paste0("lap_", normalized)]] <- lap
 
   g <- list(
     adjacency = adjacency,
@@ -36,7 +39,7 @@ new_graph <- function(adjacency, coords = NULL, normalized = FALSE, directed = F
     coords = coords,
     normalized = normalized,
     directed = directed,
-    cache = list()
+    cache = cache_env
   )
   class(g) <- "gsp_graph"
   g
@@ -131,6 +134,208 @@ graph_sensor <- function(n, k = 6, normalized = FALSE, seed = NULL) {
   new_graph(adj, coords = coords, normalized = normalized, directed = FALSE)
 }
 
+# Built-in dataset graphs -----------------------------------------------------
+
+.load_pointcloud_rds <- function(name) {
+  filename <- paste0(name, ".rds")
+  path <- system.file("extdata", "pointclouds", filename, package = "rgsp")
+  if (path == "") {
+    path <- file.path("inst", "extdata", "pointclouds", filename)
+  }
+  if (!file.exists(path)) {
+    stop("Missing extdata file: ", filename, call. = FALSE)
+  }
+  readRDS(path)
+}
+
+#' GSP Logo graph (PyGSP dataset)
+#'
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with `coords` and `info` indices
+#' @export
+graph_logo <- function(normalized = FALSE) {
+  d <- .load_pointcloud_rds("logogsp")
+  g <- new_graph(d$W, coords = d$coords, normalized = normalized, directed = FALSE)
+  g$info <- d$info
+  g$plotting <- d$plotting
+  g
+}
+
+#' Minnesota road network graph (PyGSP dataset)
+#'
+#' @param connected logical; if TRUE, match PyGSP's connected/binarized variant
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with `coords` and `labels`
+#' @export
+graph_minnesota <- function(connected = TRUE, normalized = FALSE) {
+  d <- .load_pointcloud_rds("minnesota")
+  adj <- d$A
+
+  if (isTRUE(connected)) {
+    # Match PyGSP: add missing edge then binarize.
+    adj_bin <- adj > 0
+    adj_bin[349, 355] <- TRUE
+    adj_bin[355, 349] <- TRUE
+    Matrix::diag(adj_bin) <- FALSE
+    adj <- Matrix::drop0(adj_bin + 0)
+  } else {
+    Matrix::diag(adj) <- 0
+    adj <- Matrix::drop0(adj)
+  }
+
+  g <- new_graph(adj, coords = d$xy, normalized = normalized, directed = FALSE)
+  g$labels <- d$labels
+  g$plotting <- d$plotting
+  g
+}
+
+#' Airfoil graph (PyGSP dataset)
+#'
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with `coords`
+#' @export
+graph_airfoil <- function(normalized = FALSE) {
+  d <- .load_pointcloud_rds("airfoil")
+  g <- new_graph(d$W, coords = d$coords, normalized = normalized, directed = FALSE)
+  g$plotting <- d$plotting
+  g
+}
+
+#' Stanford Bunny graph (PyGSP dataset)
+#'
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with 3D `coords`
+#' @export
+graph_bunny <- function(normalized = FALSE) {
+  d <- .load_pointcloud_rds("bunny")
+  g <- new_graph(d$W, coords = d$coords, normalized = normalized, directed = FALSE)
+  g$plotting <- d$plotting
+  g$params <- d$params
+  g
+}
+
+.two_moons_arc <- function(N, sigmad, distance, number) {
+  phi <- runif(N) * pi
+  rb <- sigmad * rnorm(N)
+  ab <- runif(N) * 2 * pi
+  bx <- rb * cos(ab)
+  by <- rb * sin(ab)
+
+  if (number == 1L) {
+    x <- cos(phi) + bx + 0.5
+    y <- -sin(phi) + by - (distance - 1) / 2
+  } else {
+    x <- cos(phi) + bx - 0.5
+    y <- sin(phi) + by + (distance - 1) / 2
+  }
+
+  cbind(x, y)
+}
+
+#' Two Moons graph (PyGSP dataset)
+#'
+#' @param moontype `"standard"` (from dataset) or `"synthesized"`
+#' @param dim point-cloud dimensionality for `moontype="standard"` (default 2)
+#' @param sigmag similarity bandwidth for weights (default 0.05)
+#' @param N number of vertices for `moontype="synthesized"` (default 400)
+#' @param sigmad noise variance for synthesized moons (default 0.07)
+#' @param distance distance between moons for synthesized graph (default 0.5)
+#' @param seed optional RNG seed for reproducibility (synthesized)
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with `coords` and `labels`
+#' @export
+graph_two_moons <- function(moontype = c("standard", "synthesized"),
+                            dim = 2,
+                            sigmag = 0.05,
+                            N = 400,
+                            sigmad = 0.07,
+                            distance = 0.5,
+                            seed = NULL,
+                            normalized = FALSE) {
+  moontype <- match.arg(moontype)
+
+  if (!is.null(seed)) {
+    old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+    set.seed(seed)
+    on.exit(if (is.null(old_seed)) rm(".Random.seed", envir = .GlobalEnv) else assign(".Random.seed", old_seed, envir = .GlobalEnv), add = TRUE)
+  }
+
+  if (moontype == "standard") {
+    d <- .load_pointcloud_rds("two_moons")
+    features <- as.matrix(d$features)
+    dim <- as.integer(dim)[1]
+    if (dim < 1L || dim > nrow(features)) stop("dim must be in [1, n_features]")
+    coords <- t(features[seq_len(dim), , drop = FALSE])
+    n_total <- nrow(coords)
+    N1 <- n_total %/% 2L
+    N2 <- n_total - N1
+    labels <- c(rep(0L, N1), rep(1L, N2))
+  } else {
+    N <- as.integer(N)[1]
+    if (N < 2L) stop("N must be >= 2")
+    N1 <- N %/% 2L
+    N2 <- N - N1
+    coords1 <- .two_moons_arc(N1, sigmad, distance, 1L)
+    coords2 <- .two_moons_arc(N2, sigmad, distance, 2L)
+    coords <- rbind(coords1, coords2)
+    labels <- c(rep(0L, N1), rep(1L, N2))
+  }
+
+  g <- graph_knn(coords,
+                 k = 5,
+                 weight = "pygsp",
+                 sigma = sigmag,
+                 sym = "average",
+                 normalized = normalized)
+  g$labels <- labels
+  g$plotting <- list(vertex_size = 30)
+  g
+}
+
+#' David sensor network graph (PyGSP dataset)
+#'
+#' For `N = 64` and `N = 500`, loads the precomputed dataset graphs.
+#' Otherwise, generates a random sensor graph using the PyGSP heuristic.
+#'
+#' @param N number of vertices (default 64)
+#' @param seed optional RNG seed
+#' @param normalized logical; compute normalized Laplacian
+#' @return a `gsp_graph` with `coords`
+#' @export
+graph_david_sensor_net <- function(N = 64, seed = NULL, normalized = FALSE) {
+  N <- as.integer(N)[1]
+  if (N < 2L) stop("N must be >= 2")
+
+  if (!is.null(seed)) {
+    old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+    set.seed(seed)
+    on.exit(if (is.null(old_seed)) rm(".Random.seed", envir = .GlobalEnv) else assign(".Random.seed", old_seed, envir = .GlobalEnv), add = TRUE)
+  }
+
+  if (N %in% c(64L, 500L)) {
+    d <- .load_pointcloud_rds(paste0("david", N))
+    g <- new_graph(d$W, coords = d$coords, normalized = normalized, directed = FALSE)
+    g$plotting <- d$plotting
+    return(g)
+  }
+
+  coords <- cbind(runif(N), runif(N))
+
+  target_dist_cutoff <- -0.125 * N / 436.075 + 0.2183
+  T <- 0.6
+  s <- sqrt(-(target_dist_cutoff^2) / (2 * log(T)))
+
+  d <- as.matrix(dist(coords))
+  W <- exp(-(d^2) / (2 * s^2))
+  W[W < T] <- 0
+  diag(W) <- 0
+
+  adj <- Matrix::Matrix(W, sparse = TRUE)
+  g <- new_graph(adj, coords = coords, normalized = normalized, directed = FALSE)
+  g$plotting <- list(limits = c(0, 1, 0, 1))
+  g
+}
+
 #' k-nearest-neighbor graph
 #'
 #' Build an undirected k-NN graph from node coordinates. Supports simple binary
@@ -140,10 +345,10 @@ graph_sensor <- function(n, k = 6, normalized = FALSE, seed = NULL) {
 #'
 #' @param coords numeric matrix of node coordinates (n x d)
 #' @param k number of neighbors per node (clipped to `n-1`)
-#' @param weight weighting scheme: `"heat"`, `"binary"`, or `"distance"`
+#' @param weight weighting scheme: `"heat"`, `"binary"`, `"distance"`, or `"pygsp"`
 #' @param sigma optional bandwidth for `weight = "heat"`; defaults to the median
 #'   k-NN distance
-#' @param sym symmetrization mode: `"union"` (default) or `"mutual"`
+#' @param sym symmetrization mode: `"union"` (default), `"mutual"`, or `"average"`
 #' @param normalized logical; if TRUE compute normalized Laplacian
 #' @param seed optional RNG seed for reproducibility
 #' @param eps small constant to avoid divide-by-zero for distance weights
@@ -151,9 +356,11 @@ graph_sensor <- function(n, k = 6, normalized = FALSE, seed = NULL) {
 #' @return `gsp_graph` object
 #' @importFrom FNN get.knn
 #' @export
-graph_knn <- function(coords, k = 6, weight = c("heat", "binary", "distance"),
-                      sigma = NULL, sym = c("union", "mutual"),
+graph_knn <- function(coords, k = 6, weight = c("heat", "binary", "distance", "pygsp"),
+                      sigma = NULL, sym = c("union", "mutual", "average"),
                       normalized = FALSE, seed = NULL, eps = 1e-8) {
+  if (length(weight) > 1) weight <- weight[1]
+  if (length(sym) > 1) sym <- sym[1]
   weight <- match.arg(weight)
   sym <- match.arg(sym)
   coords <- as.matrix(coords)
@@ -183,7 +390,12 @@ graph_knn <- function(coords, k = 6, weight = c("heat", "binary", "distance"),
   }
 
   # weights ------------------------------------------------------------------
-  if (weight == "heat") {
+  if (weight == "pygsp") {
+    # PyGSP NNGraph-style similarity weights: exp(-d^2 / sigma)
+    sigma <- sigma %||% mean(nn_dist[nn_dist > 0], na.rm = TRUE)
+    sigma <- if (is.na(sigma) || sigma == 0) 1 else sigma
+    w <- exp(-(nn_dist^2) / sigma)
+  } else if (weight == "heat") {
     sigma <- sigma %||% stats::median(nn_dist[nn_dist > 0], na.rm = TRUE)
     sigma <- if (is.na(sigma) || sigma == 0) 1 else sigma
     w <- exp(-(nn_dist^2) / (2 * sigma^2))
@@ -201,8 +413,11 @@ graph_knn <- function(coords, k = 6, weight = c("heat", "binary", "distance"),
 
   if (sym == "union") {
     adj <- (adj + Matrix::t(adj) + abs(adj - Matrix::t(adj))) / 2
-  } else {
+  } else if (sym == "mutual") {
     adj <- (adj + Matrix::t(adj) - abs(adj - Matrix::t(adj))) / 2
+  } else {
+    # average
+    adj <- (adj + Matrix::t(adj)) / 2
   }
   adj <- Matrix::drop0(adj)
 
@@ -415,7 +630,11 @@ graph_barabasi_albert <- function(n, m = 2, seed = NULL, normalized = FALSE) {
 #' @return the graph with cleared cache
 #' @export
 graph_cache_clear <- function(g) {
-  g$cache <- list()
+  if (is.environment(g$cache)) {
+    rm(list = ls(envir = g$cache, all.names = TRUE), envir = g$cache)
+  } else {
+    g$cache <- list()
+  }
   g
 }
 
@@ -424,10 +643,11 @@ graph_cache_clear <- function(g) {
 #' @return numeric vector of node degrees
 #' @export
 graph_degree <- function(g) {
+  if (!is.null(g$degree)) return(g$degree)
   if (!is.null(g$cache$degree)) return(g$cache$degree)
+
   deg <- degree_cpp(g$adjacency)
   g$cache$degree <- deg
-  g$degree <- deg
   deg
 }
 
@@ -438,12 +658,13 @@ graph_degree <- function(g) {
 #' @export
 graph_laplacian <- function(g, normalized = g$normalized) {
   key <- paste0("lap_", normalized)
-  if (!is.null(g$cache[[key]])) return(g$cache[[key]])
-  L <- laplacian_cpp(g$adjacency, normalized = normalized)
-  g$cache[[key]] <- L
-  if (identical(normalized, g$normalized)) {
-    g$laplacian <- L
+  if (identical(normalized, g$normalized) && !is.null(g$laplacian)) {
+    return(g$laplacian)
   }
+  if (!is.null(g$cache[[key]])) return(g$cache[[key]])
+
+  L <- laplacian_cpp(g$adjacency, normalized = normalized, directed = g$directed)
+  g$cache[[key]] <- L
   L
 }
 
@@ -455,8 +676,6 @@ graph_laplacian <- function(g, normalized = g$normalized) {
 graph_rescale <- function(g, factor) {
   adj <- g$adjacency * factor
   g2 <- new_graph(adj, coords = g$coords, normalized = g$normalized, directed = g$directed)
-  g2 <- graph_cache_invalidate_struct(g2)
-  g2 <- graph_cache_invalidate_spectra(g2)
   g2
 }
 
@@ -473,8 +692,6 @@ graph_sparsify <- function(g, tol = 1e-12) {
     adj <- Matrix::forceSymmetric(adj, uplo = "U")
   }
   g2 <- new_graph(adj, coords = g$coords, normalized = g$normalized, directed = g$directed)
-  g2 <- graph_cache_invalidate_struct(g2)
-  g2 <- graph_cache_invalidate_spectra(g2)
   g2
 }
 
@@ -706,9 +923,12 @@ graph_steerable_family <- function(g,
       }
     }
 
-    g_theta <- g
-    g_theta$adjacency <- Matrix::drop0(W_theta)
-    g_theta <- graph_invalidate_cache(g_theta)
+    g_theta <- new_graph(
+      Matrix::drop0(W_theta),
+      coords = g$coords,
+      normalized = g$normalized,
+      directed = g$directed
+    )
     g_theta$orientation <- u
     graphs[[d_idx]] <- g_theta
   }

@@ -14,6 +14,7 @@ This directory contains benchmark scripts for measuring rgsp performance and com
 | `bench_threads.R` | OpenMP/BLAS thread scaling benchmarks |
 | `bench_tv.R` | Total variation optimization benchmarks |
 | `bench_pygsp_compare.R` | Side-by-side timing vs PyGSP (GFT/IGFT, heat filter) |
+| `bench_sparsify_spectral.R` | Spectral sparsification + downstream speedup benchmark |
 
 ## Running Benchmarks
 

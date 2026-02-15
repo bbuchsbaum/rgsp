@@ -223,6 +223,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// proj_simplex_rows_cpp
+arma::mat proj_simplex_rows_cpp(const arma::mat& Y);
+RcppExport SEXP _rgsp_proj_simplex_rows_cpp(SEXP YSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Y(YSEXP);
+    rcpp_result_gen = Rcpp::wrap(proj_simplex_rows_cpp(Y));
+    return rcpp_result_gen;
+END_RCPP
+}
 // proj_l2_ball_cpp
 arma::vec proj_l2_ball_cpp(const arma::vec& y, double r);
 RcppExport SEXP _rgsp_proj_l2_ball_cpp(SEXP ySEXP, SEXP rSEXP) {
@@ -281,6 +292,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_rgsp_tv_denoise_fista_cpp", (DL_FUNC) &_rgsp_tv_denoise_fista_cpp, 6},
     {"_rgsp_prox_graph_tv_cpp", (DL_FUNC) &_rgsp_prox_graph_tv_cpp, 9},
     {"_rgsp_proj_simplex_cpp", (DL_FUNC) &_rgsp_proj_simplex_cpp, 1},
+    {"_rgsp_proj_simplex_rows_cpp", (DL_FUNC) &_rgsp_proj_simplex_rows_cpp, 1},
     {"_rgsp_proj_l2_ball_cpp", (DL_FUNC) &_rgsp_proj_l2_ball_cpp, 2},
     {"_rgsp_prox_box_cpp", (DL_FUNC) &_rgsp_prox_box_cpp, 3},
     {"_rgsp_tikhonov_solve_cpp", (DL_FUNC) &_rgsp_tikhonov_solve_cpp, 5},

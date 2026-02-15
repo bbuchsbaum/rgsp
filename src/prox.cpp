@@ -177,6 +177,38 @@ arma::vec proj_simplex_cpp(const arma::vec& y) {
     return x;
 }
 
+// Projection of each row onto simplex {x >=0, sum x = 1}
+// [[Rcpp::export]]
+arma::mat proj_simplex_rows_cpp(const arma::mat& Y) {
+    arma::mat X = Y;
+    arma::uword n = X.n_rows;
+    arma::uword d = X.n_cols;
+    if (d == 0) return X;
+
+    const arma::vec denom = arma::conv_to<arma::vec>::from(arma::regspace<arma::uvec>(1, d));
+
+    arma::vec row(d);
+    arma::vec u(d);
+    arma::vec css(d);
+    arma::vec rho_vec(d);
+
+    for (arma::uword r = 0; r < n; ++r) {
+        row = X.row(r).t();
+        u = arma::sort(row, "descend");
+        css = arma::cumsum(u);
+        rho_vec = u - (css - 1) / denom;
+        arma::uword rho = 0;
+        for (arma::uword i = 0; i < d; ++i) {
+            if (rho_vec[i] > 0) rho = i;
+        }
+        double theta = (css[rho] - 1) / (rho + 1);
+        row = arma::clamp(row - theta, 0.0, arma::datum::inf);
+        X.row(r) = row.t();
+    }
+
+    return X;
+}
+
 // Projection onto l2-ball of radius r
 // [[Rcpp::export]]
 arma::vec proj_l2_ball_cpp(const arma::vec& y, double r) {

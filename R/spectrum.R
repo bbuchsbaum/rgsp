@@ -61,7 +61,24 @@ lambda_max <- function(g, normalized = g$normalized) {
   key <- paste0("lmax_", normalized)
   if (!is.null(g$cache[[key]])) return(g$cache[[key]])
   L <- graph_laplacian(g, normalized = normalized)
-  val <- RSpectra::eigs_sym(L, k = 1, which = "LA")$values[1]
+  val <- tryCatch({
+    out <- suppressWarnings(RSpectra::eigs_sym(L, k = 1, which = "LA"))
+    if (length(out$values) < 1) {
+      NA_real_
+    } else {
+      as.numeric(out$values[1])
+    }
+  }, error = function(e) NA_real_)
+
+  if (!is.finite(val) || is.na(val)) {
+    # Robust upper bounds (Gershgorin) as fallback.
+    if (isTRUE(normalized)) {
+      val <- 2
+    } else {
+      deg <- graph_degree(g)
+      val <- 2 * max(as.numeric(deg))
+    }
+  }
   g$cache[[key]] <- val
   val
 }

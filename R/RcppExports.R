@@ -65,6 +65,10 @@ proj_simplex_cpp <- function(y) {
     .Call(`_rgsp_proj_simplex_cpp`, y)
 }
 
+proj_simplex_rows_cpp <- function(Y) {
+    .Call(`_rgsp_proj_simplex_rows_cpp`, Y)
+}
+
 proj_l2_ball_cpp <- function(y, r) {
     .Call(`_rgsp_proj_l2_ball_cpp`, y, r)
 }

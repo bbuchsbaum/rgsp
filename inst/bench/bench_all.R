@@ -130,7 +130,7 @@ run_full_benchmarks <- function() {
   results <- list()
 
   # Run individual benchmark scripts
-  scripts <- c("bench_gft.R", "bench_chebyshev.R", "bench_wavelets.R")
+  scripts <- c("bench_gft.R", "bench_chebyshev.R", "bench_wavelets.R", "bench_sparsify_spectral.R")
 
   for (script in scripts) {
     script_path <- file.path(bench_dir, script)

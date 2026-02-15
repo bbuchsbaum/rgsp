@@ -5,7 +5,13 @@
 #' @return the graph with spectral cache cleared
 #' @export
 graph_cache_invalidate_spectra <- function(g) {
-  if (!is.null(g$cache)) {
+  if (is.environment(g$cache)) {
+    to_drop <- ls(envir = g$cache, all.names = TRUE)
+    to_drop <- to_drop[grepl("^(eig_|lmax_|cheby_)", to_drop)]
+    if (length(to_drop) > 0) {
+      rm(list = to_drop, envir = g$cache)
+    }
+  } else if (!is.null(g$cache)) {
     g$cache[grepl("^eig_|^lmax_|^cheby_", names(g$cache))] <- NULL
   }
 
@@ -18,7 +24,13 @@ graph_cache_invalidate_spectra <- function(g) {
 #' @return the graph with structural cache cleared
 #' @export
 graph_cache_invalidate_struct <- function(g) {
-  if (!is.null(g$cache)) {
+  if (is.environment(g$cache)) {
+    to_drop <- ls(envir = g$cache, all.names = TRUE)
+    to_drop <- to_drop[grepl("^(lap_|degree$|laplacian_sp$)", to_drop)]
+    if (length(to_drop) > 0) {
+      rm(list = to_drop, envir = g$cache)
+    }
+  } else if (!is.null(g$cache)) {
     g$cache[grepl("^lap_|^degree", names(g$cache))] <- NULL
   }
   g$degree <- NULL

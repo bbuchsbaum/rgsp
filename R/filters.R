@@ -244,6 +244,214 @@ mexican_hat_wavelet_bank <- function(scales, n_scales = NULL, lmax = NULL, lpfac
   lapply(scales, function(s) kernel_mexican_hat(s))
 }
 
+#' Logarithmically spaced scales (PyGSP-compatible helper)
+#'
+#' @param lmin smallest non-zero eigenvalue proxy
+#' @param lmax spectral radius
+#' @param n_scales number of scales
+#' @param t1 lower kernel support parameter
+#' @param t2 upper kernel support parameter
+#' @keywords internal
+compute_log_scales <- function(lmin, lmax, n_scales, t1 = 1, t2 = 2) {
+  stopifnot(lmin > 0, lmax > 0, n_scales >= 1)
+  scale_min <- t1 / lmax
+  scale_max <- t2 / lmin
+  exp(seq(log(scale_max), log(scale_min), length.out = n_scales))
+}
+
+#' Abspline (A–B cubic spline) wavelet filter bank
+#'
+#' Port of `pygsp.filters.Abspline` as a list of kernel functions.
+#'
+#' @param lmax spectral radius, or a `gsp_graph`
+#' @param Nf number of filters (default 6)
+#' @param lpfactor low-pass factor (default 20)
+#' @param scales optional vector of scales (length `Nf-1`)
+#' @return list of `Nf` kernel functions (lowpass + wavelets)
+#' @export
+abspline_filter_bank <- function(lmax, Nf = 6, lpfactor = 20, scales = NULL) {
+  if (inherits(lmax, "gsp_graph")) {
+    g <- lmax
+    lmax <- lambda_max(g, normalized = g$normalized)
+  }
+  lmax <- as.numeric(lmax)[1]
+  Nf <- as.integer(Nf)[1]
+  stopifnot(is.finite(lmax), lmax > 0, Nf >= 2, lpfactor > 0)
+
+  # A–B cubic spline kernel (PyGSP defaults: alpha=beta=2, t1=1, t2=2)
+  kernel_abspline3 <- local({
+    alpha <- 2
+    beta <- 2
+    t1 <- 1
+    t2 <- 2
+    M <- rbind(
+      c(1, t1, t1^2, t1^3),
+      c(1, t2, t2^2, t2^3),
+      c(0, 1, 2 * t1, 3 * t1^2),
+      c(0, 1, 2 * t2, 3 * t2^2)
+    )
+    v <- c(1, 1, alpha, -beta / 2)
+    a <- solve(M, v)
+
+    function(x) {
+      x <- pmax(x, 0)
+      r <- numeric(length(x))
+      r1 <- x <= t1
+      r2 <- x > t1 & x < t2
+      r3 <- x >= t2
+      if (any(r1)) r[r1] <- x[r1]^alpha * t1^(-alpha)
+      if (any(r2)) {
+        x2 <- x[r2]
+        r[r2] <- a[1] + a[2] * x2 + a[3] * x2^2 + a[4] * x2^3
+      }
+      if (any(r3)) r[r3] <- x[r3]^(-beta) * t2^beta
+      r
+    }
+  })
+
+  gl <- function(x) exp(-x^4)
+  lmin <- lmax / lpfactor
+
+  if (is.null(scales)) {
+    scales <- compute_log_scales(lmin, lmax, Nf - 1)
+  }
+  if (length(scales) != (Nf - 1)) stop("len(scales) must be Nf-1")
+  scales <- as.numeric(scales)
+
+  gb <- function(x) kernel_abspline3(x)
+
+  # gamma_l = max_{x in [1,2]} gb(x)
+  grid <- seq(1, 2, length.out = 2048)
+  gamma_l <- max(gb(grid))
+  lminfac <- 0.6 * lmin
+
+  kernels <- vector("list", Nf)
+  kernels[[1]] <- local({
+    gl0 <- gl
+    gam <- gamma_l
+    lmf <- lminfac
+    function(lambda) gam * gl0(lambda / lmf)
+  })
+
+  for (k in seq_len(Nf - 1)) {
+    kernels[[k + 1]] <- local({
+      s <- scales[k]
+      function(lambda) gb(s * lambda)
+    })
+  }
+
+  names(kernels) <- c("lowpass", paste0("wavelet_", seq_len(Nf - 1)))
+  attr(kernels, "scales") <- scales
+  attr(kernels, "lpfactor") <- lpfactor
+  kernels
+}
+
+#' Itersine tight-frame filter bank
+#'
+#' Port of `pygsp.filters.Itersine` as a list of kernel functions.
+#'
+#' @param lmax spectral radius, or a `gsp_graph`
+#' @param Nf number of filters from 0..lmax (default 6)
+#' @param overlap overlap parameter (default 2)
+#' @return list of `Nf` kernel functions
+#' @export
+itersine_filter_bank <- function(lmax, Nf = 6, overlap = 2) {
+  if (inherits(lmax, "gsp_graph")) {
+    g <- lmax
+    lmax <- lambda_max(g, normalized = g$normalized)
+  }
+  lmax <- as.numeric(lmax)[1]
+  Nf <- as.integer(Nf)[1]
+  overlap <- as.numeric(overlap)[1]
+  stopifnot(is.finite(lmax), lmax > 0, Nf >= 2, overlap > 0)
+
+  scale <- lmax / (Nf - overlap + 1) * overlap
+
+  base_kernel <- function(x) {
+    y <- cos(x * pi)^2
+    y <- sin(0.5 * pi * y)
+    y * as.numeric(x >= -0.5 & x <= 0.5)
+  }
+
+  kernels <- vector("list", Nf)
+  for (k in seq_len(Nf)) {
+    kernels[[k]] <- local({
+      kk <- k
+      sc <- scale
+      ov <- overlap
+      function(lambda) {
+        x <- lambda / sc - (kk - ov / 2) / ov
+        base_kernel(x) * sqrt(2 / ov)
+      }
+    })
+  }
+  names(kernels) <- paste0("band_", seq_len(Nf))
+  attr(kernels, "overlap") <- overlap
+  kernels
+}
+
+#' Simple tight-frame wavelet filter bank
+#'
+#' Port of `pygsp.filters.SimpleTight` as a list of kernel functions.
+#'
+#' @param lmax spectral radius, or a `gsp_graph`
+#' @param Nf number of filters covering `[0, lmax]` (default 6)
+#' @param scales optional scales (length `Nf-1`)
+#' @return list of `Nf` kernel functions (scaling + wavelets)
+#' @export
+simpletight_filter_bank <- function(lmax, Nf = 6, scales = NULL) {
+  if (inherits(lmax, "gsp_graph")) {
+    g <- lmax
+    lmax <- lambda_max(g, normalized = g$normalized)
+  }
+  lmax <- as.numeric(lmax)[1]
+  Nf <- as.integer(Nf)[1]
+  stopifnot(is.finite(lmax), lmax > 0, Nf >= 2)
+
+  if (is.null(scales)) {
+    scales <- (1 / (2 * lmax)) * 2^(seq(Nf - 2, 0, by = -1))
+  }
+  if (length(scales) != (Nf - 1)) stop("len(scales) must be Nf-1")
+  scales <- as.numeric(scales)
+
+  kernel_simpletight <- function(x, type = c("sf", "wavelet")) {
+    type <- match.arg(type)
+    l1 <- 0.25
+    l2 <- 0.5
+    l3 <- 1.0
+    h <- function(z) sin(pi * z / 2)^2
+    r <- numeric(length(x))
+    r1 <- x < l1
+    r2 <- x >= l1 & x < l2
+    r3 <- x >= l2 & x < l3
+
+    if (type == "sf") {
+      r[r1] <- 1
+      if (any(r2)) r[r2] <- sqrt(pmax(0, 1 - h(4 * x[r2] - 1)^2))
+    } else {
+      if (any(r2)) r[r2] <- h(4 * (x[r2] - 1 / 4))
+      if (any(r3)) r[r3] <- sqrt(pmax(0, 1 - h(2 * x[r3] - 1)^2))
+    }
+    r
+  }
+
+  kernels <- vector("list", Nf)
+  kernels[[1]] <- local({
+    s0 <- scales[1]
+    function(lambda) kernel_simpletight(s0 * lambda, "sf")
+  })
+  for (k in seq_len(Nf - 1)) {
+    kernels[[k + 1]] <- local({
+      s <- scales[k]
+      function(lambda) kernel_simpletight(s * lambda, "wavelet")
+    })
+  }
+
+  names(kernels) <- c("scaling", paste0("wavelet_", seq_len(Nf - 1)))
+  attr(kernels, "scales") <- scales
+  kernels
+}
+
 #' Tight frame filter bank (lowpass + bandpasses)
 #'
 #' Creates a partition-of-unity filter bank using half-cosine / half-sine
