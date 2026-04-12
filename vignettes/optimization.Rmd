@@ -32,6 +32,8 @@ knitr::opts_chunk$set(
 if (requireNamespace("ggplot2", quietly = TRUE) && requireNamespace("albersdown", quietly = TRUE)) ggplot2::theme_set(albersdown::theme_albers(family = params$family, preset = params$preset))
 library(rgsp)
 set.seed(42)
+has_ggplot2 <- requireNamespace("ggplot2", quietly = TRUE)
+if (has_ggplot2) library(ggplot2)
 ```
 
 ```{r albers-classes, echo=FALSE, results='asis'}
@@ -65,37 +67,50 @@ $$\min_x \|x - y\|^2 + \tau \cdot x^T L x$$
 
 where $L$ is the graph Laplacian and $\tau$ controls smoothness.
 
-```{r tikhonov-basic}
-# Create noisy signal on ring graph
+```{r tikhonov-basic, eval = has_ggplot2}
 g <- graph_ring(100)
-x_true <- sin(seq(0, 2*pi, length.out = g$n))
+x_true <- sin(seq(0, 2 * pi, length.out = g$n))
 x_noisy <- x_true + rnorm(g$n, sd = 0.3)
-
-# Tikhonov smoothing
 x_smooth <- tikhonov_smooth(g, x_noisy, tau = 2)
 
-# Compare
-plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
-     main = "Tikhonov Smoothing")
-lines(x_true, col = "black", lwd = 2)
-lines(x_smooth, col = "blue", lwd = 2)
-legend("topright", c("Noisy", "True", "Smoothed"),
-       col = c("gray", "black", "blue"), lwd = c(NA, 2, 2), pch = c(16, NA, NA))
+tikh_df <- data.frame(
+  node = rep(seq_len(g$n), 3),
+  value = c(x_noisy, x_true, x_smooth),
+  series = factor(rep(c("Noisy", "True", "Smoothed"), each = g$n),
+                  levels = c("Noisy", "True", "Smoothed"))
+)
+
+ggplot(tikh_df, aes(node, value, color = series, linetype = series, shape = series)) +
+  geom_point(data = subset(tikh_df, series == "Noisy"), size = 1.3, alpha = 0.6) +
+  geom_line(data = subset(tikh_df, series != "Noisy"), linewidth = 1) +
+  scale_color_manual(values = c(Noisy = "grey50", True = "black", Smoothed = "#1f78b4")) +
+  scale_linetype_manual(values = c(Noisy = "blank", True = "solid", Smoothed = "solid")) +
+  scale_shape_manual(values = c(Noisy = 16, True = NA, Smoothed = NA)) +
+  labs(title = "Tikhonov smoothing on a ring graph", x = "node index", y = NULL,
+       color = NULL, linetype = NULL, shape = NULL)
 ```
 
 ### Effect of Regularization Parameter
 
-```{r tikhonov-tau}
+```{r tikhonov-tau, eval = has_ggplot2, fig.height = 5}
 taus <- c(0.1, 1, 5, 20)
-results <- sapply(taus, function(tau) tikhonov_smooth(g, x_noisy, tau = tau))
+tau_df <- do.call(rbind, lapply(taus, function(tau) {
+  data.frame(
+    node = seq_len(g$n),
+    noisy = x_noisy,
+    true = x_true,
+    smoothed = tikhonov_smooth(g, x_noisy, tau = tau),
+    panel = factor(sprintf("tau = %g", tau), levels = sprintf("tau = %g", taus))
+  )
+}))
 
-par(mfrow = c(2, 2))
-for (i in seq_along(taus)) {
-  plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
-       main = paste("tau =", taus[i]))
-  lines(x_true, col = "black")
-  lines(results[, i], col = "blue", lwd = 2)
-}
+ggplot(tau_df, aes(node)) +
+  geom_point(aes(y = noisy), color = "grey60", size = 0.9, alpha = 0.6) +
+  geom_line(aes(y = true), color = "grey30", linewidth = 0.5) +
+  geom_line(aes(y = smoothed), color = "#1f78b4", linewidth = 1) +
+  facet_wrap(~ panel) +
+  labs(title = "Increasing tau trades fidelity for smoothness",
+       x = "node index", y = NULL)
 ```
 
 ## Total Variation Denoising
@@ -106,44 +121,53 @@ $$\min_x \frac{1}{2}\|x - y\|^2 + \lambda \|Dx\|_1$$
 
 where $D$ is the graph gradient operator. TV preserves edges better than Tikhonov.
 
-```{r tv-denoise}
-# Create piecewise constant signal
+```{r tv-denoise, eval = has_ggplot2}
 g <- graph_path(100)
 x_true <- c(rep(0, 30), rep(1, 40), rep(0, 30))
 x_noisy <- x_true + rnorm(g$n, sd = 0.2)
-
-# TV denoising
 x_tv <- tv_denoise(g, x_noisy, lambda = 1, maxit = 200)
-
-# Compare with Tikhonov
 x_tikh <- tikhonov_smooth(g, x_noisy, tau = 5)
 
-plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
-     main = "TV vs Tikhonov Denoising")
-lines(x_true, col = "black", lwd = 2)
-lines(x_tv, col = "red", lwd = 2)
-lines(x_tikh, col = "blue", lwd = 2, lty = 2)
-legend("topright", c("Noisy", "True", "TV", "Tikhonov"),
-       col = c("gray", "black", "red", "blue"),
-       lwd = c(NA, 2, 2, 2), lty = c(NA, 1, 1, 2), pch = c(16, NA, NA, NA))
+tv_df <- data.frame(
+  node = rep(seq_len(g$n), 4),
+  value = c(x_noisy, x_true, x_tv, x_tikh),
+  series = factor(rep(c("Noisy", "True", "TV", "Tikhonov"), each = g$n),
+                  levels = c("Noisy", "True", "TV", "Tikhonov"))
+)
+
+ggplot(tv_df, aes(node, value, color = series)) +
+  geom_point(data = subset(tv_df, series == "Noisy"), size = 1.2, alpha = 0.5) +
+  geom_line(data = subset(tv_df, series == "True"), linewidth = 0.8) +
+  geom_line(data = subset(tv_df, series == "TV"), linewidth = 1.1) +
+  geom_line(data = subset(tv_df, series == "Tikhonov"), linewidth = 1.1, linetype = "dashed") +
+  scale_color_manual(values = c(Noisy = "grey60", True = "black",
+                                TV = "#d73027", Tikhonov = "#1f78b4")) +
+  labs(title = "TV preserves the jump; Tikhonov rounds it off",
+       x = "node index", y = NULL, color = NULL)
 ```
 
 ### TV Parameters
 
-```{r tv-params}
-# Effect of lambda
+```{r tv-params, eval = has_ggplot2, fig.height = 5}
 lambdas <- c(0.1, 0.5, 1, 2)
-tv_results <- sapply(lambdas, function(lam) {
-  tv_denoise(g, x_noisy, lambda = lam, maxit = 200)
-})
+tv_df2 <- do.call(rbind, lapply(lambdas, function(lam) {
+  data.frame(
+    node = seq_len(g$n),
+    noisy = x_noisy,
+    true = x_true,
+    denoised = tv_denoise(g, x_noisy, lambda = lam, maxit = 200),
+    panel = factor(sprintf("lambda = %g", lam),
+                   levels = sprintf("lambda = %g", lambdas))
+  )
+}))
 
-par(mfrow = c(2, 2))
-for (i in seq_along(lambdas)) {
-  plot(x_noisy, col = "gray", pch = 16, cex = 0.5,
-       main = paste("lambda =", lambdas[i]))
-  lines(x_true, col = "black")
-  lines(tv_results[, i], col = "red", lwd = 2)
-}
+ggplot(tv_df2, aes(node)) +
+  geom_point(aes(y = noisy), color = "grey60", size = 0.9, alpha = 0.6) +
+  geom_line(aes(y = true), color = "grey30", linewidth = 0.5) +
+  geom_line(aes(y = denoised), color = "#d73027", linewidth = 1.1) +
+  facet_wrap(~ panel) +
+  labs(title = "Larger lambda collapses variation, even across the true jump",
+       x = "node index", y = NULL)
 ```
 
 ## Inpainting (Missing Value Recovery)
@@ -172,19 +196,38 @@ cat("MSE on missing values:",
 
 TV inpainting preserves edges in the recovered signal:
 
-```{r inpaint-tv}
-# Piecewise constant signal
+```{r inpaint-tv, eval = has_ggplot2}
 x_true <- c(rep(0, 30), rep(1, 40), rep(0, 30))
 x_obs <- x_true
 x_obs[sample(100, 20)] <- NA  # 20% missing
-
 g <- graph_path(100)
 x_tv_inpaint <- tv_inpaint(g, x_obs, lambda = 0.5, maxit = 200)
 
-plot(x_true, type = "l", lwd = 2, main = "TV Inpainting")
-points(which(is.na(x_obs)), x_tv_inpaint[is.na(x_obs)], col = "red", pch = 16)
-legend("topright", c("True", "Recovered"), col = c("black", "red"),
-       lwd = c(2, NA), pch = c(NA, 16))
+missing_idx <- which(is.na(x_obs))
+inpaint_df <- rbind(
+  data.frame(node = seq_len(g$n), value = x_true,
+             role = "True signal"),
+  data.frame(node = missing_idx, value = x_tv_inpaint[missing_idx],
+             role = "Recovered (was missing)"),
+  data.frame(node = setdiff(seq_len(g$n), missing_idx),
+             value = x_obs[!is.na(x_obs)],
+             role = "Observed")
+)
+inpaint_df$role <- factor(inpaint_df$role,
+  levels = c("True signal", "Observed", "Recovered (was missing)"))
+
+ggplot(inpaint_df, aes(node, value, color = role, shape = role, size = role)) +
+  geom_line(data = subset(inpaint_df, role == "True signal"), linewidth = 0.7) +
+  geom_point(data = subset(inpaint_df, role != "True signal")) +
+  scale_color_manual(values = c(`True signal` = "grey40",
+                                Observed = "black",
+                                `Recovered (was missing)` = "#d73027")) +
+  scale_shape_manual(values = c(`True signal` = NA, Observed = 1,
+                                `Recovered (was missing)` = 16)) +
+  scale_size_manual(values = c(`True signal` = 0.7, Observed = 1.5,
+                               `Recovered (was missing)` = 2.5)) +
+  labs(title = "TV inpainting: 20% of nodes hidden, recovered in red",
+       x = "node index", y = NULL, color = NULL, shape = NULL, size = NULL)
 ```
 
 ## Proximal Operators

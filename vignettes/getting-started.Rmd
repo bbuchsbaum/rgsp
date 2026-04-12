@@ -53,6 +53,59 @@ If you have one measurement per node and a graph that tells you which nodes are 
 
 The main object is a `gsp_graph`: it stores the adjacency structure, coordinates when available, and cached spectral quantities. A graph signal is just a numeric vector with one value per node.
 
+## Hero example: heat diffusion on a road network
+
+Before getting into the mechanics, here is the kind of picture `rgsp` is built to produce. We drop a unit impulse at one node of the Minnesota road network (2,642 intersections, 3,304 roads) and watch the heat kernel spread it outward for four diffusion times. The same filter call that produces these pictures is the one you will use on your own graph a few sections down.
+
+```{r hero-minnesota, eval = has_ggplot2, fig.width = 8, fig.height = 6.5}
+library(ggplot2)
+
+mn <- graph_minnesota()
+source_node <- which.min(rowSums(sweep(mn$coords, 2, c(-93.25, 44.98))^2))  # near Minneapolis
+delta <- numeric(mn$n); delta[source_node] <- 1
+taus <- c(5, 25, 100, 400)
+
+diffused <- lapply(taus, function(tau) {
+  filter_signal(mn, delta, kernel_heat(tau), K = 60)
+})
+
+tri <- Matrix::summary(Matrix::tril(mn$adjacency))
+edges_df <- data.frame(
+  x = mn$coords[tri$i, 1], y = mn$coords[tri$i, 2],
+  xend = mn$coords[tri$j, 1], yend = mn$coords[tri$j, 2]
+)
+
+nodes_df <- do.call(rbind, lapply(seq_along(taus), function(k) {
+  data.frame(
+    x = mn$coords[, 1], y = mn$coords[, 2],
+    heat = log1p(pmax(diffused[[k]], 0) * 1e4),
+    panel = factor(sprintf("tau = %g", taus[k]),
+                   levels = sprintf("tau = %g", taus))
+  )
+}))
+
+ggplot(nodes_df, aes(x, y)) +
+  geom_segment(data = edges_df, aes(xend = xend, yend = yend),
+               color = "grey85", linewidth = 0.2) +
+  geom_point(aes(color = heat, alpha = heat), size = 0.45) +
+  scale_color_gradientn(
+    colors = c("grey80", "grey70", "#fdae61", "#d73027", "#7f0000"),
+    guide = "none"
+  ) +
+  scale_alpha_continuous(range = c(0.25, 1), guide = "none") +
+  facet_wrap(~ panel, nrow = 2) +
+  coord_fixed() +
+  labs(title = "Heat kernel applied to an impulse on the Minnesota road network",
+       subtitle = "Same graph, same source node, four diffusion times") +
+  theme_minimal(base_size = 11) +
+  theme(axis.title = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"),
+        strip.text = element_text(face = "bold"))
+```
+
+One function call (`filter_signal`) implements the filter; the only thing that changes between panels is the scale parameter of `kernel_heat()`. Larger scales produce a more delocalized result, which is exactly what "low-pass on a graph" means when the domain is a road network instead of a regular grid.
+
 ## What do the inputs look like?
 
 ```{r build-graph}
