@@ -2,17 +2,63 @@ skip_if_no_pygsp <- function() {
   if (!requireNamespace("reticulate", quietly = TRUE)) {
     testthat::skip("reticulate not installed")
   }
-  if (!reticulate::py_available(initialize = FALSE)) {
+
+  pygsp_candidates <- c("pygsp", file.path("..", "pygsp"), file.path("..", "..", "pygsp"))
+  vendored_pygsp <- ""
+  for (candidate in pygsp_candidates) {
+    candidate_path <- normalizePath(candidate, winslash = "/", mustWork = FALSE)
+    if (dir.exists(candidate_path)) {
+      vendored_pygsp <- candidate_path
+      break
+    }
+  }
+  if (dir.exists(vendored_pygsp)) {
+    if (!reticulate::py_available(initialize = FALSE)) {
+      if (!nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
+        py_bin <- Sys.which("python")
+        if (nzchar(py_bin)) {
+          Sys.setenv(RETICULATE_PYTHON = py_bin)
+          reticulate::use_python(py_bin, required = FALSE)
+        }
+      }
+
+      py_path <- Sys.getenv("PYTHONPATH")
+      py_parts <- Filter(nzchar, strsplit(py_path, .Platform$path.sep, fixed = TRUE)[[1]])
+      if (!(vendored_pygsp %in% py_parts)) {
+        Sys.setenv(PYTHONPATH = paste(c(vendored_pygsp, py_parts), collapse = .Platform$path.sep))
+      }
+    }
+  }
+
+  if (!reticulate::py_available(initialize = TRUE)) {
     testthat::skip("Python not available for reticulate parity tests")
   }
-  if (!reticulate::py_module_available("pygsp")) {
-    testthat::skip("PyGSP not available (pip install pygsp)")
+
+  if (!reticulate::py_module_available("pygsp") && dir.exists(vendored_pygsp)) {
+    try(
+      reticulate::py_run_string(
+        sprintf("import sys\np = %s\nif p not in sys.path:\n    sys.path.insert(0, p)", dQuote(vendored_pygsp))
+      ),
+      silent = TRUE
+    )
+  }
+
+  can_import_pygsp <- !inherits(
+    try(reticulate::import("pygsp.graphs", delay_load = FALSE), silent = TRUE),
+    "try-error"
+  )
+
+  if (!can_import_pygsp) {
+    testthat::skip("PyGSP not available (vendored ./pygsp not importable)")
   }
 }
 
 get_pygsp <- function() {
   list(
-    pygsp = reticulate::import("pygsp"),
+    pygsp = list(
+      graphs = reticulate::import("pygsp.graphs"),
+      filters = reticulate::import("pygsp.filters")
+    ),
     np = reticulate::import("numpy")
   )
 }

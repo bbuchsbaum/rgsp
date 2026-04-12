@@ -11,12 +11,12 @@ Core graph signal processing algorithms with C++ acceleration via RcppArmadillo.
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/yourname/rgsp}
+  \item \url{https://github.com/bbuchsbaum/rgsp}
 }
 
 }
 \author{
-\strong{Maintainer}: Your Name \email{you@example.com}
+\strong{Maintainer}: Brad Buchsbaum \email{brad.buchsbaum@gmail.com}
 
 }
 \keyword{internal}

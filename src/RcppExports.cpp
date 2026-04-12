@@ -11,6 +11,20 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// chebyshev_filter_ring_cpp
+arma::mat chebyshev_filter_ring_cpp(const arma::mat& X, const arma::vec& coeffs, double lambda_max, bool periodic);
+RcppExport SEXP _rgsp_chebyshev_filter_ring_cpp(SEXP XSEXP, SEXP coeffsSEXP, SEXP lambda_maxSEXP, SEXP periodicSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type coeffs(coeffsSEXP);
+    Rcpp::traits::input_parameter< double >::type lambda_max(lambda_maxSEXP);
+    Rcpp::traits::input_parameter< bool >::type periodic(periodicSEXP);
+    rcpp_result_gen = Rcpp::wrap(chebyshev_filter_ring_cpp(X, coeffs, lambda_max, periodic));
+    return rcpp_result_gen;
+END_RCPP
+}
 // chebyshev_filter_cpp
 arma::mat chebyshev_filter_cpp(const arma::sp_mat& L, const arma::mat& X, const arma::vec& coeffs, double lambda_max);
 RcppExport SEXP _rgsp_chebyshev_filter_cpp(SEXP LSEXP, SEXP XSEXP, SEXP coeffsSEXP, SEXP lambda_maxSEXP) {
@@ -73,6 +87,29 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
     Rcpp::traits::input_parameter< int >::type precision(precisionSEXP);
     rcpp_result_gen = Rcpp::wrap(chebyshev_filter_omp_cpp(L_ptr, X, coeffs, lambda_max, threads, precision));
+    return rcpp_result_gen;
+END_RCPP
+}
+// dense_mat_xptr_cpp
+SEXP dense_mat_xptr_cpp(const arma::mat& X);
+RcppExport SEXP _rgsp_dense_mat_xptr_cpp(SEXP XSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    rcpp_result_gen = Rcpp::wrap(dense_mat_xptr_cpp(X));
+    return rcpp_result_gen;
+END_RCPP
+}
+// dense_matmul_xptr_cpp
+arma::mat dense_matmul_xptr_cpp(SEXP A_ptr, const arma::mat& B);
+RcppExport SEXP _rgsp_dense_matmul_xptr_cpp(SEXP A_ptrSEXP, SEXP BSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type A_ptr(A_ptrSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
+    rcpp_result_gen = Rcpp::wrap(dense_matmul_xptr_cpp(A_ptr, B));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -276,11 +313,14 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_rgsp_chebyshev_filter_ring_cpp", (DL_FUNC) &_rgsp_chebyshev_filter_ring_cpp, 4},
     {"_rgsp_chebyshev_filter_cpp", (DL_FUNC) &_rgsp_chebyshev_filter_cpp, 4},
     {"_rgsp_chebyshev_filter_xptr_cpp", (DL_FUNC) &_rgsp_chebyshev_filter_xptr_cpp, 4},
     {"_rgsp_laplacian_sp_xptr_cpp", (DL_FUNC) &_rgsp_laplacian_sp_xptr_cpp, 1},
     {"_rgsp_set_omp_threads_cpp", (DL_FUNC) &_rgsp_set_omp_threads_cpp, 1},
     {"_rgsp_chebyshev_filter_omp_cpp", (DL_FUNC) &_rgsp_chebyshev_filter_omp_cpp, 6},
+    {"_rgsp_dense_mat_xptr_cpp", (DL_FUNC) &_rgsp_dense_mat_xptr_cpp, 1},
+    {"_rgsp_dense_matmul_xptr_cpp", (DL_FUNC) &_rgsp_dense_matmul_xptr_cpp, 2},
     {"_rgsp_degree_cpp", (DL_FUNC) &_rgsp_degree_cpp, 1},
     {"_rgsp_laplacian_cpp", (DL_FUNC) &_rgsp_laplacian_cpp, 3},
     {"_rgsp_adjacency_ring_cpp", (DL_FUNC) &_rgsp_adjacency_ring_cpp, 2},

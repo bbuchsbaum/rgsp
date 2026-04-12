@@ -1,4 +1,4 @@
-url: https://yourname.github.io/rgsp/
+url: https://bbuchsbaum.github.io/rgsp/
 
 template:
   bootstrap: 5
@@ -16,7 +16,7 @@ navbar:
     github:
       icon: fa-github
       aria-label: GitHub
-      href: https://github.com/yourname/rgsp
+      href: https://github.com/bbuchsbaum/rgsp
 
 reference:
   - title: Graph Construction

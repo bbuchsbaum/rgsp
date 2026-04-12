@@ -13,22 +13,17 @@ suppressPackageStartupMessages({
   library(bench)
   library(Matrix)
   library(rgsp)
+  library(reticulate)
 })
 
-# Try to load PyGSP for comparison
-pygsp_available <- FALSE
-pygsp <- NULL
-np <- NULL
+source("inst/bench/pygsp_setup.R")
 
-if (requireNamespace("reticulate", quietly = TRUE)) {
-  tryCatch({
-    pygsp <- reticulate::import("pygsp", delay_load = FALSE)
-    np <- reticulate::import("numpy", delay_load = FALSE)
-    pygsp_available <- TRUE
-    message("PyGSP available for comparison benchmarks")
-  }, error = function(e) {
-    message("PyGSP not available; running R-only benchmarks")
-  })
+py <- init_pygsp_bench()
+pygsp_available <- !is.null(py)
+if (pygsp_available) {
+  message("PyGSP available for comparison benchmarks")
+} else {
+  message("PyGSP not available; running R-only benchmarks")
 }
 
 # ==============================================================================
@@ -64,8 +59,18 @@ bench_chebyshev_vs_pygsp <- function(n, kernel_name = "heat", K = 30,
     stop("Unknown kernel")
   )
 
+  kernel_cmp <- kernel_r
+  lmax_cmp <- lmax_r
+
+  if (pygsp_available && identical(kernel_name, "heat")) {
+    g_py_tmp <- py$graphs$Ring(as.integer(n))
+    g_py_tmp$estimate_lmax()
+    lmax_cmp <- as.numeric(g_py_tmp$lmax)
+    kernel_cmp <- kernel_heat(1 / lmax_cmp)
+  }
+
   # R benchmark
-  b_r <- bench_chebyshev_r(g_r, signals, kernel_r, K, lmax_r, reps)
+  b_r <- bench_chebyshev_r(g_r, signals, kernel_cmp, K, lmax_cmp, reps)
 
   result <- data.frame(
     n = n,
@@ -78,18 +83,18 @@ bench_chebyshev_vs_pygsp <- function(n, kernel_name = "heat", K = 30,
 
   # PyGSP comparison if available
   if (pygsp_available) {
-    g_py <- pygsp$graphs$Ring(as.integer(n))
+    g_py <- py$graphs$Ring(as.integer(n))
     g_py$estimate_lmax()
 
     # Create PyGSP filter
     filt_py <- switch(kernel_name,
-      heat = pygsp$filters$Heat(g_py, tau = 1.0),
-      mexican_hat = pygsp$filters$MexicanHat(g_py, Nf = 1L),
-      exponential = pygsp$filters$Expwin(g_py),
+      heat = py$filters$Heat(g_py, scale = 1.0),
+      mexican_hat = py$filters$MexicanHat(g_py, Nf = 1L),
+      exponential = py$filters$Expwin(g_py),
       stop("Unknown kernel for PyGSP")
     )
 
-    signals_py <- np$array(signals)
+    signals_py <- py$np$array(signals)
 
     # PyGSP benchmark
     b_py <- mark(

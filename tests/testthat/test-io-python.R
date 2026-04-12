@@ -1,5 +1,9 @@
 # NetworkX / graph-tool I/O tests (optional; skip if Python deps missing)
 
+test_that("graph-tool export helper is byte-compilable", {
+  expect_error(compiler::cmpfun(graph_to_graphtool), NA)
+})
+
 skip_if_no_networkx <- function() {
   if (!requireNamespace("reticulate", quietly = TRUE)) {
     testthat::skip("reticulate not installed")
@@ -28,4 +32,3 @@ test_that("NetworkX round-trip preserves adjacency", {
   expect_equal(Matrix::drop0(g2$adjacency), Matrix::drop0(g$adjacency))
   expect_equal(as.matrix(g2$coords), as.matrix(g$coords))
 })
-

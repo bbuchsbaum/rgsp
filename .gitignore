@@ -11,6 +11,7 @@
 
 # Python virtual environment
 .venv-pygsp/
+pygsp/
 
 # Temporary/generated files
 .covr_result.rds

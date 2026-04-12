@@ -15,6 +15,99 @@ test_that("heat filter via Chebyshev matches eigen filtering", {
   expect_equal(y_cheb, y_exact, tolerance = 1e-4)
 })
 
+test_that("heat filter via Chebyshev matches eigen filtering for matrix signals", {
+  set.seed(42)
+  g <- graph_ring(128)
+  X <- matrix(rnorm(128 * 8), nrow = 128, ncol = 8)
+  t <- 0.25
+  K <- 40
+  eig <- graph_eigenpairs(g)
+  U <- eig$vectors
+  lam <- eig$values
+  H <- diag(exp(-t * lam))
+  y_exact <- U %*% H %*% t(U) %*% X
+
+  y_cheb <- filter_signal(g, X, kernel_heat(t), K = K, strategy = "cheby")
+  expect_equal(y_cheb, y_exact, tolerance = 1e-4)
+})
+
+test_that("exact ring filtering matches eigen filtering for matrix signals", {
+  set.seed(42)
+  g <- graph_ring(128)
+  X <- matrix(rnorm(128 * 8), nrow = 128, ncol = 8)
+  t <- 0.25
+  eig <- graph_eigenpairs(g)
+  U <- eig$vectors
+  lam <- eig$values
+  H <- diag(exp(-t * lam))
+  y_exact <- U %*% H %*% t(U) %*% X
+
+  y_ring <- filter_signal_exact(g, X, kernel_heat(t))
+  expect_equal(y_ring, y_exact, tolerance = 1e-8)
+})
+
+test_that("auto strategy on ring uses the exact path", {
+  set.seed(42)
+  g <- graph_ring(64)
+  X <- matrix(rnorm(64 * 4), nrow = 64, ncol = 4)
+  t <- 0.25
+
+  y_auto <- filter_signal(g, X, kernel_heat(t), strategy = "auto")
+  y_exact <- filter_signal(g, X, kernel_heat(t), strategy = "exact")
+
+  expect_equal(y_auto, y_exact, tolerance = 1e-10)
+})
+
+test_that("exact path filtering matches eigen filtering for matrix signals", {
+  set.seed(42)
+  g <- graph_path(96)
+  X <- matrix(rnorm(96 * 6), nrow = 96, ncol = 6)
+  t <- 0.2
+  eig <- graph_eigenpairs(g)
+  U <- eig$vectors
+  lam <- eig$values
+  H <- diag(exp(-t * lam))
+  y_exact <- U %*% H %*% t(U) %*% X
+
+  y_path <- filter_signal_exact(g, X, kernel_heat(t))
+  expect_equal(y_path, y_exact, tolerance = 1e-8)
+})
+
+test_that("exact grid2d filtering matches eigen filtering for matrix signals", {
+  set.seed(42)
+  g <- graph_grid2d(6, 5)
+  X <- matrix(rnorm(30 * 4), nrow = 30, ncol = 4)
+  t <- 0.2
+  eig <- graph_eigenpairs(g)
+  U <- eig$vectors
+  lam <- eig$values
+  H <- diag(exp(-t * lam))
+  y_exact <- U %*% H %*% t(U) %*% X
+
+  y_grid <- filter_signal_exact(g, X, kernel_heat(t))
+  expect_equal(y_grid, y_exact, tolerance = 1e-8)
+})
+
+test_that("auto strategy on path and grid2d uses the exact path", {
+  set.seed(42)
+
+  g_path <- graph_path(512)
+  X_path <- matrix(rnorm(512 * 3), nrow = 512, ncol = 3)
+  expect_equal(
+    filter_signal(g_path, X_path, kernel_heat(0.2), strategy = "auto"),
+    filter_signal(g_path, X_path, kernel_heat(0.2), strategy = "exact"),
+    tolerance = 1e-10
+  )
+
+  g_grid <- graph_grid2d(4, 5)
+  X_grid <- matrix(rnorm(20 * 3), nrow = 20, ncol = 3)
+  expect_equal(
+    filter_signal(g_grid, X_grid, kernel_heat(0.2), strategy = "auto"),
+    filter_signal(g_grid, X_grid, kernel_heat(0.2), strategy = "exact"),
+    tolerance = 1e-10
+  )
+})
+
 test_that("heat filter via Lanczos matches eigen filtering", {
   set.seed(42)
   g <- graph_ring(12)
@@ -52,6 +145,12 @@ test_that("Jackson damping applies monotone weights", {
   expect_true(all(w >= 0))
   expect_true(max(w) <= 1)
   expect_true(all(diff(w[-1]) <= 1e-12)) # non-increasing after k=1
+})
+
+test_that("Chebyshev coefficients trim negligible heat terms", {
+  coeffs <- rgsp:::cheby_coeffs(kernel_heat(0.25), K = 30, lmax = 4, cache = FALSE)
+  expect_lt(length(coeffs), 30)
+  expect_equal(length(coeffs), 10)
 })
 
 test_that("filter bank returns list with correct lengths", {

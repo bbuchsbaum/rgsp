@@ -52,7 +52,10 @@ new_graph <- function(adjacency, coords = NULL, normalized = FALSE, directed = F
 #' @export
 graph_ring <- function(n, periodic = TRUE, normalized = FALSE) {
   adj <- adjacency_ring_cpp(as.integer(n), periodic = periodic)
-  new_graph(adj, normalized = normalized, directed = FALSE)
+  g <- new_graph(adj, normalized = normalized, directed = FALSE)
+  g$graph_type <- if (isTRUE(periodic)) "ring" else "path"
+  g$graph_params <- list(periodic = isTRUE(periodic), n = as.integer(n))
+  g
 }
 
 #' Path graph (alias)
@@ -61,7 +64,10 @@ graph_ring <- function(n, periodic = TRUE, normalized = FALSE) {
 #' @return a gsp_graph object
 #' @export
 graph_path <- function(n, normalized = FALSE) {
-  graph_ring(n, periodic = FALSE, normalized = normalized)
+  g <- graph_ring(n, periodic = FALSE, normalized = normalized)
+  g$graph_type <- "path"
+  g$graph_params <- list(periodic = FALSE, n = as.integer(n))
+  g
 }
 
 #' 3D grid graph (optionally torus)
@@ -86,7 +92,10 @@ graph_grid3d <- function(nx, ny, nz, periodic = FALSE, normalized = FALSE) {
 graph_grid2d <- function(nrow, ncol, periodic = FALSE, normalized = FALSE) {
   adj <- adjacency_grid2d_cpp(as.integer(nrow), as.integer(ncol), periodic = periodic)
   coords <- as.matrix(expand.grid(x = seq_len(ncol), y = seq_len(nrow)))
-  new_graph(adj, coords = coords, normalized = normalized, directed = FALSE)
+  g <- new_graph(adj, coords = coords, normalized = normalized, directed = FALSE)
+  g$graph_type <- "grid2d"
+  g$graph_params <- list(nrow = as.integer(nrow), ncol = as.integer(ncol), periodic = isTRUE(periodic))
+  g
 }
 
 #' Random geometric graph in 2D (unit square)
@@ -130,6 +139,7 @@ graph_sensor <- function(n, k = 6, normalized = FALSE, seed = NULL) {
   x <- rep(1, length(i))
   adj <- Matrix::sparseMatrix(i = i, j = j, x = x, dims = c(n, n))
   adj <- (adj + t(adj)) > 0
+  Matrix::diag(adj) <- FALSE
   adj <- Matrix::Matrix(adj, sparse = TRUE)
   new_graph(adj, coords = coords, normalized = normalized, directed = FALSE)
 }

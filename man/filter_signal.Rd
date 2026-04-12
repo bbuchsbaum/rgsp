@@ -13,7 +13,7 @@ filter_signal(
   jackson = FALSE,
   threads = NULL,
   precision = c("double"),
-  strategy = c("auto", "cheby", "lanczos")
+  strategy = c("auto", "cheby", "lanczos", "exact")
 )
 }
 \arguments{
@@ -33,7 +33,7 @@ filter_signal(
 
 \item{precision}{numeric precision (currently only "double")}
 
-\item{strategy}{filtering strategy: "auto", "cheby", or "lanczos"}
+\item{strategy}{filtering strategy: "auto", "cheby", "lanczos", or "exact"}
 }
 \value{
 filtered signal (vector or matrix)

@@ -11,22 +11,17 @@ suppressPackageStartupMessages({
   library(bench)
   library(Matrix)
   library(rgsp)
+  library(reticulate)
 })
 
-# Try to load PyGSP for comparison
-pygsp_available <- FALSE
-pygsp <- NULL
-np <- NULL
+source("inst/bench/pygsp_setup.R")
 
-if (requireNamespace("reticulate", quietly = TRUE)) {
-  tryCatch({
-    pygsp <- reticulate::import("pygsp", delay_load = FALSE)
-    np <- reticulate::import("numpy", delay_load = FALSE)
-    pygsp_available <- TRUE
-    message("PyGSP available for comparison benchmarks")
-  }, error = function(e) {
-    message("PyGSP not available; running R-only benchmarks")
-  })
+py <- init_pygsp_bench()
+pygsp_available <- !is.null(py)
+if (pygsp_available) {
+  message("PyGSP available for comparison benchmarks")
+} else {
+  message("PyGSP not available; running R-only benchmarks")
 }
 
 # ==============================================================================
@@ -98,9 +93,9 @@ bench_gft_vs_pygsp <- function(n, graph_type = "ring", n_signals = 1, reps = 5) 
   # PyGSP comparison if available
 if (pygsp_available) {
     g_py <- switch(graph_type,
-      ring = pygsp$graphs$Ring(as.integer(n)),
-      path = pygsp$graphs$Path(as.integer(n)),
-      grid = pygsp$graphs$Grid2d(as.integer(sqrt(n)), as.integer(sqrt(n))),
+      ring = py$graphs$Ring(as.integer(n)),
+      path = py$graphs$Path(as.integer(n)),
+      grid = py$graphs$Grid2d(as.integer(sqrt(n)), as.integer(sqrt(n))),
       stop("Unknown graph type")
     )
 
@@ -110,7 +105,7 @@ if (pygsp_available) {
     })["elapsed"]
 
     # PyGSP GFT
-    signals_py <- np$array(signals)
+    signals_py <- py$np$array(signals)
     t_gft_py <- bench::mark(
       pygsp_gft = g_py$gft(signals_py),
       iterations = reps,

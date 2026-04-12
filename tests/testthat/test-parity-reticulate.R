@@ -5,20 +5,91 @@ skip_if_no_pygsp <- function() {
   if (!requireNamespace("reticulate", quietly = TRUE)) {
     testthat::skip("reticulate not installed")
   }
-  if (!reticulate::py_available(initialize = FALSE)) {
+
+  pygsp_candidates <- c("pygsp", file.path("..", "pygsp"), file.path("..", "..", "pygsp"))
+  vendored_pygsp <- ""
+  for (candidate in pygsp_candidates) {
+    candidate_path <- normalizePath(candidate, winslash = "/", mustWork = FALSE)
+    if (dir.exists(candidate_path)) {
+      vendored_pygsp <- candidate_path
+      break
+    }
+  }
+  if (dir.exists(vendored_pygsp)) {
+    if (!reticulate::py_available(initialize = FALSE)) {
+      if (!nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
+        py_bin <- Sys.which("python")
+        if (nzchar(py_bin)) {
+          Sys.setenv(RETICULATE_PYTHON = py_bin)
+          reticulate::use_python(py_bin, required = FALSE)
+        }
+      }
+
+      py_path <- Sys.getenv("PYTHONPATH")
+      py_parts <- Filter(nzchar, strsplit(py_path, .Platform$path.sep, fixed = TRUE)[[1]])
+      if (!(vendored_pygsp %in% py_parts)) {
+        Sys.setenv(PYTHONPATH = paste(c(vendored_pygsp, py_parts), collapse = .Platform$path.sep))
+      }
+    }
+  }
+
+  if (!reticulate::py_available(initialize = TRUE)) {
     testthat::skip("Python not available for reticulate parity tests")
   }
-  if (!reticulate::py_module_available("pygsp")) {
-    testthat::skip("PyGSP not available (pip install pygsp)")
+
+  if (!reticulate::py_module_available("pygsp") && dir.exists(vendored_pygsp)) {
+    try(
+      reticulate::py_run_string(
+        sprintf("import sys\np = %s\nif p not in sys.path:\n    sys.path.insert(0, p)", dQuote(vendored_pygsp))
+      ),
+      silent = TRUE
+    )
+  }
+
+  can_import_pygsp <- !inherits(
+    try(reticulate::import("pygsp.graphs", delay_load = FALSE), silent = TRUE),
+    "try-error"
+  )
+
+  if (!can_import_pygsp) {
+    testthat::skip("PyGSP not available (vendored ./pygsp not importable)")
   }
 }
 
 # Helper to import PyGSP modules
 get_pygsp <- function() {
   list(
-    pygsp = reticulate::import("pygsp"),
-    np = reticulate::import("numpy")
+    pygsp = list(
+      graphs = reticulate::import("pygsp.graphs"),
+      filters = reticulate::import("pygsp.filters")
+    ),
+    np = reticulate::import("numpy"),
+    scipy_sparse = reticulate::import("scipy.sparse")
   )
+}
+
+as_parity_dgC <- function(adjacency) {
+  adjacency <- Matrix::drop0(adjacency)
+  if (methods::is(adjacency, "dsCMatrix")) {
+    adjacency <- methods::as(adjacency, "generalMatrix")
+    adjacency <- methods::as(adjacency, "CsparseMatrix")
+  } else if (!inherits(adjacency, "dgCMatrix")) {
+    adjacency <- methods::as(adjacency, "dgCMatrix")
+  }
+  adjacency
+}
+
+pygsp_graph_from_adjacency <- function(py, adjacency) {
+  adjacency <- as_parity_dgC(adjacency)
+  pymain <- reticulate::import_main()
+  pymain$scipy_sparse <- py$scipy_sparse
+  pymain$x <- as.numeric(adjacency@x)
+  pymain$i <- as.integer(adjacency@i)
+  pymain$p <- as.integer(adjacency@p)
+  pymain$n0 <- as.integer(nrow(adjacency))
+  pymain$n1 <- as.integer(ncol(adjacency))
+  reticulate::py_run_string("A_py = scipy_sparse.csc_matrix((x, i, p), shape=(n0, n1))\n")
+  py$pygsp$graphs$Graph(pymain$A_py)
 }
 
 # ==============================================================================
@@ -177,22 +248,24 @@ test_that("Heat filter: output matches PyGSP", {
   py <- get_pygsp()
 
   g_py <- py$pygsp$graphs$Ring(12L)
+  g_py$compute_fourier_basis()
   g_py$estimate_lmax()
 
-  tau <- 0.5
-  filt_py <- py$pygsp$filters$Heat(g_py, tau)
+  scale <- 0.5
+  filt_py <- py$pygsp$filters$Heat(g_py, scale)
 
   set.seed(123)
   x <- rnorm(12)
   x_py <- py$np$array(x)
 
-  y_py <- as.numeric(filt_py$filter(x_py))
+  y_py <- as.numeric(filt_py$filter(x_py, method = "exact"))
 
   g_r <- graph_ring(12)
-  lmax <- as.numeric(g_py$lmax)
-  y_r <- filter_signal(g_r, x, kernel_heat(tau), K = 50, lmax = lmax)
+  lmax_py <- as.numeric(g_py$lmax)
+  t_rgsp <- scale / lmax_py
+  y_r <- filter_signal(g_r, x, kernel_heat(t_rgsp), K = 50, lmax = lmax_py, strategy = "cheby")
 
-  expect_gt(cor(as.numeric(y_r), y_py), 0.94)
+  expect_equal(as.numeric(y_r), y_py, tolerance = 1e-10)
 })
 
 test_that("Heat filter on Grid2d matches PyGSP", {
@@ -200,48 +273,107 @@ test_that("Heat filter on Grid2d matches PyGSP", {
   py <- get_pygsp()
 
   g_py <- py$pygsp$graphs$Grid2d(4L, 4L)
+  g_py$compute_fourier_basis()
   g_py$estimate_lmax()
 
-  tau <- 1.0
-  filt_py <- py$pygsp$filters$Heat(g_py, tau)
+  scale <- 1.0
+  filt_py <- py$pygsp$filters$Heat(g_py, scale)
 
   set.seed(456)
   x <- rnorm(16)
   x_py <- py$np$array(x)
 
-  y_py <- as.numeric(filt_py$filter(x_py))
+  y_py <- as.numeric(filt_py$filter(x_py, method = "exact"))
 
   g_r <- graph_grid2d(4, 4)
-  y_r <- filter_signal(g_r, x, kernel_heat(tau), K = 100, lmax = as.numeric(g_py$lmax))
+  lmax_py <- as.numeric(g_py$lmax)
+  t_rgsp <- scale / lmax_py
+  y_r <- filter_signal(g_r, x, kernel_heat(t_rgsp), K = 120, lmax = lmax_py, strategy = "cheby")
 
-  expect_gt(cor(as.numeric(y_r), y_py), 0.7)
+  expect_equal(as.numeric(y_r), y_py, tolerance = 1e-10)
 })
 
-test_that("Mexican hat wavelet bank: filter count and energy conservation", {
+test_that("Heat filter on the same sensor graph adjacency matches PyGSP", {
+  skip_if_no_pygsp()
+  py <- get_pygsp()
+
+  set.seed(42)
+  g_r <- graph_sensor(128, k = 6, seed = 42)
+  g_py <- pygsp_graph_from_adjacency(py, g_r$adjacency)
+  g_py$estimate_lmax()
+
+  scale <- 1.0
+  filt_py <- py$pygsp$filters$Heat(g_py, scale)
+
+  X <- matrix(rnorm(128 * 4), nrow = 128, ncol = 4)
+  X_py <- py$np$array(X)
+
+  y_py <- as.matrix(filt_py$filter(X_py, method = "chebyshev", order = as.integer(30)))
+
+  lmax_py <- as.numeric(g_py$lmax)
+  t_rgsp <- scale / lmax_py
+  y_r <- filter_signal(g_r, X, kernel_heat(t_rgsp), K = 30, lmax = lmax_py, strategy = "cheby")
+
+  expect_equal(y_r, y_py, tolerance = 1e-10)
+})
+
+test_that("Heat filter on the same random geometric graph adjacency matches PyGSP", {
+  skip_if_no_pygsp()
+  py <- get_pygsp()
+
+  set.seed(7)
+  g_r <- graph_random_geometric(96, radius = 0.18, seed = 7)
+  g_py <- pygsp_graph_from_adjacency(py, g_r$adjacency)
+  g_py$compute_fourier_basis()
+
+  scale <- 1.0
+  filt_py <- py$pygsp$filters$Heat(g_py, scale)
+
+  X <- matrix(rnorm(96 * 3), nrow = 96, ncol = 3)
+  X_py <- py$np$array(X)
+
+  y_py <- as.matrix(filt_py$filter(X_py, method = "exact"))
+
+  lmax_py <- max(as.numeric(g_py$e))
+  t_rgsp <- scale / lmax_py
+  y_r <- filter_signal(g_r, X, kernel_heat(t_rgsp), K = 30, lmax = lmax_py, strategy = "cheby")
+
+  expect_equal(y_r, y_py, tolerance = 1e-10)
+})
+
+test_that("Mexican hat wavelet bands match PyGSP up to the known scale factor", {
   skip_if_no_pygsp()
   py <- get_pygsp()
 
   g_py <- py$pygsp$graphs$Ring(20L)
+  g_py$compute_fourier_basis()
   g_py$estimate_lmax()
 
-  # Create Mexican hat filter bank
-  Nf <- 4L  # 4 wavelet scales
+  Nf <- 4L
   filt_py <- py$pygsp$filters$MexicanHat(g_py, Nf = Nf)
 
   set.seed(789)
   x <- rnorm(20)
   x_py <- py$np$array(x)
 
-  # PyGSP analysis
-  coeffs_py <- filt_py$filter(x_py)
-  n_bands_py <- ncol(as.matrix(coeffs_py))
-
-  # rgsp: Use mexican_hat_wavelet_bank
+  coeffs_py <- as.matrix(filt_py$filter(x_py, method = "exact"))
+  scales_py <- as.numeric(reticulate::py_to_r(filt_py$scales))
   g_r <- graph_ring(20)
-  bank_r <- mexican_hat_wavelet_bank(g_r, n_scales = Nf, lmax = as.numeric(g_py$lmax))
+  eig <- graph_eigenpairs(g_r)
 
-  # Both should have same number of bands
-  expect_equal(length(bank_r), n_bands_py)
+  # PyGSP includes a lowpass scaling function in column 1. rgsp's Mexican hat
+  # helper exposes only the wavelet bands, which match PyGSP columns 2:(Nf+1)
+  # up to the known multiplicative scale factor.
+  expect_equal(ncol(coeffs_py), length(scales_py) + 1L)
+
+  for (i in seq_along(scales_py)) {
+    s <- scales_py[[i]]
+    sigma_r <- 1 / s
+    y_r <- as.numeric(
+      eig$vectors %*% diag(kernel_mexican_hat(sigma_r)(eig$values)) %*% t(eig$vectors) %*% x
+    )
+    expect_equal(s * y_r, coeffs_py[, i + 1L], tolerance = 1e-10)
+  }
 })
 
 test_that("Meyer wavelet bank: band count matches PyGSP", {
@@ -433,32 +565,25 @@ test_that("Frame bounds estimation is consistent with PyGSP", {
   g_py$estimate_lmax()
 
   filt_py <- py$pygsp$filters$Heat(g_py, 1.0)
-  bounds_py <- filt_py$estimate_frame_bounds()
-  A_py <- bounds_py[[1]]
-  B_py <- bounds_py[[2]]
+  bounds_py <- as.numeric(unlist(filt_py$estimate_frame_bounds()))
 
   g_r <- graph_ring(10)
-  kernels <- list(kernel_heat(1.0))
-  frame_r <- compute_frame(g_r, kernels, method = "exact")
+  lmax_py <- as.numeric(g_py$lmax)
+  bounds_r <- estimate_frame_bounds(list(kernel_heat(1 / lmax_py)), lmax_py, n_samples = 4096)
 
-  # Single filter: frame bounds should be min/max of kernel squared over spectrum
-  expect_true(frame_r$A > 0)
-  expect_true(frame_r$B >= frame_r$A)
-
-  # For heat kernel, A and B should be in reasonable range
-  expect_true(A_py > 0)
-  expect_true(B_py >= A_py)
+  expect_equal(unname(as.numeric(bounds_r)), bounds_py, tolerance = 1e-12)
 })
 
 # ==============================================================================
 # Multi-signal filtering parity
 # ==============================================================================
 
-test_that("Multi-signal filtering produces correct dimensions", {
+test_that("Multi-signal filtering matches PyGSP exactly on the matrix path", {
   skip_if_no_pygsp()
   py <- get_pygsp()
 
   g_py <- py$pygsp$graphs$Ring(8L)
+  g_py$compute_fourier_basis()
   g_py$estimate_lmax()
 
   filt_py <- py$pygsp$filters$Heat(g_py, 0.5)
@@ -468,13 +593,15 @@ test_that("Multi-signal filtering produces correct dimensions", {
   X <- matrix(rnorm(8 * 5), nrow = 8, ncol = 5)
   X_py <- py$np$array(X)
 
-  Y_py <- as.matrix(filt_py$filter(X_py))
+  Y_py <- as.matrix(filt_py$filter(X_py, method = "exact"))
 
   g_r <- graph_ring(8)
-  Y_r <- filter_signal(g_r, X, kernel_heat(0.5), K = 100, lmax = as.numeric(g_py$lmax))
+  lmax_py <- as.numeric(g_py$lmax)
+  t_rgsp <- 0.5 / lmax_py
+  Y_r <- filter_signal(g_r, X, kernel_heat(t_rgsp), K = 120, lmax = lmax_py, strategy = "cheby")
 
   expect_equal(dim(Y_r), dim(Y_py))
-  expect_gt(cor(as.numeric(Y_r), as.numeric(Y_py)), 0.9)
+  expect_equal(Y_r, Y_py, tolerance = 1e-10)
 })
 
 # ==============================================================================
@@ -529,9 +656,9 @@ test_that("Chebyshev-filtered output matches PyGSP Chebyshev", {
   g_r <- graph_ring(12)
   lmax_py <- as.numeric(g_py$lmax)
   t_rgsp <- scale / lmax_py
-  y_r_cheby <- filter_signal(g_r, x, kernel_heat(t_rgsp), K = 30, lmax = lmax_py)
+  y_r_cheby <- filter_signal(g_r, x, kernel_heat(t_rgsp), K = 30, lmax = lmax_py, strategy = "cheby")
 
-  expect_gt(cor(as.numeric(y_r_cheby), y_py_cheby), 0.95)
+  expect_equal(as.numeric(y_r_cheby), y_py_cheby, tolerance = 1e-10)
 })
 
 test_that("Kron reduction eigenvalues match PyGSP", {
@@ -555,7 +682,7 @@ test_that("Kron reduction eigenvalues match PyGSP", {
   expect_equal(eig_r, eig_py, tolerance = 1e-8)
 })
 
-test_that("Meyer wavelet kernel evaluations match PyGSP at eigenvalues", {
+test_that("Meyer wavelet bank exposes the same number of bands as PyGSP", {
   skip_if_no_pygsp()
   py <- get_pygsp()
 

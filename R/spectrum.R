@@ -31,11 +31,22 @@ graph_eigenpairs <- function(g, k = NULL, which = "SM", normalized = g$normalize
 gft <- function(g, signal, k = NULL) {
   eig <- graph_eigenpairs(g, k = k)
   U <- eig$vectors
+  key_t <- paste0("eig_", g$normalized, "_", if (is.null(k)) "full" else k, "_", "SM", "_t")
+  Ut <- g$cache[[key_t]]
+  if (is.null(Ut)) {
+    Ut <- t(U)
+    g$cache[[key_t]] <- Ut
+  }
   if (is.null(dim(signal))) {
     signal <- matrix(signal, ncol = 1)
   }
   if (nrow(signal) != nrow(U)) stop("signal length must match number of nodes")
-  t(U) %*% signal
+  Ut_ptr <- g$cache[[paste0(key_t, "_xptr")]]
+  if (is.null(Ut_ptr)) {
+    Ut_ptr <- dense_mat_xptr_cpp(Ut)
+    g$cache[[paste0(key_t, "_xptr")]] <- Ut_ptr
+  }
+  dense_matmul_xptr_cpp(Ut_ptr, signal)
 }
 
 #' Inverse Graph Fourier Transform
@@ -49,7 +60,13 @@ igft <- function(g, coeffs, k = NULL) {
   if (is.null(dim(coeffs))) {
     coeffs <- matrix(coeffs, ncol = 1)
   }
-  U %*% coeffs
+  key <- paste0("eig_", g$normalized, "_", if (is.null(k)) "full" else k, "_", "SM")
+  U_ptr <- g$cache[[paste0(key, "_xptr")]]
+  if (is.null(U_ptr)) {
+    U_ptr <- dense_mat_xptr_cpp(U)
+    g$cache[[paste0(key, "_xptr")]] <- U_ptr
+  }
+  dense_matmul_xptr_cpp(U_ptr, coeffs)
 }
 
 #' Estimate largest eigenvalue (spectral radius)

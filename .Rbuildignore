@@ -21,3 +21,5 @@
 ^rgsp\.Rcheck$
 ^rgsp_.*\.tar\.gz$
 ^\.rcmdcheck_result\.rds$
+^src/Makevars\.bak$
+^data-raw$

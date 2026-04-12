@@ -8,6 +8,7 @@ test_that("sensor graph kNN symmetric and seeded", {
   g1 <- graph_sensor(25, k = 4, seed = 42)
   g2 <- graph_sensor(25, k = 4, seed = 42)
   expect_true(Matrix::isSymmetric(g1$adjacency))
+  expect_true(all(Matrix::diag(g1$adjacency) == 0))
   expect_equal(g1$adjacency, g2$adjacency)
 })
 

@@ -147,7 +147,7 @@ graph_to_graphtool <- function(g) {
   if (nrow(edges) > 0) {
     graph$add_edge_list(reticulate::r_to_py(cbind(edges$i - 1L, edges$j - 1L), convert = TRUE))
     wprop <- graph$new_edge_property("double")
-    wprop$get_array()[seq_len(nrow(edges))] <- as.numeric(edges$x)
+    reticulate::py_set_attr(wprop, "a", as.numeric(edges$x))
     graph$edge_properties[["weight"]] <- wprop
   }
 

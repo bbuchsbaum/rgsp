@@ -19,6 +19,18 @@ cheby_cache_key <- function(kernel, K, lmax, M, jackson) {
   )
 }
 
+trim_cheby_coeffs <- function(coeffs, rel_tol = 1e-12, abs_tol = 1e-14) {
+  if (!length(coeffs)) {
+    return(coeffs)
+  }
+  scale <- max(abs(coeffs))
+  keep <- which(abs(coeffs) > max(abs_tol, scale * rel_tol))
+  if (!length(keep)) {
+    return(coeffs[1])
+  }
+  coeffs[seq_len(max(keep))]
+}
+
 #' Chebyshev coefficients for a spectral kernel
 #' @param kernel function of lambda
 #' @param K polynomial order (>=1)
@@ -48,6 +60,7 @@ cheby_coeffs <- function(kernel, K, lmax, M = NULL, jackson = FALSE, cache = TRU
   if (jackson) {
     coeffs <- coeffs * jackson_weights(K)
   }
+  coeffs <- trim_cheby_coeffs(coeffs)
   if (cache) {
     assign(key, coeffs, envir = .cheby_cache)
   }
@@ -540,13 +553,13 @@ tight_frame_papadakis <- function(lmax, J = 3) {
 #' @param jackson logical; apply Jackson damping
 #' @param threads optional number of OpenMP threads
 #' @param precision numeric precision (currently only "double")
-#' @param strategy filtering strategy: "auto", "cheby", or "lanczos"
+#' @param strategy filtering strategy: "auto", "cheby", "lanczos", or "exact"
 #' @return filtered signal (vector or matrix)
 #' @export
 filter_signal <- function(g, signal, kernel, K = 30, lmax = NULL, jackson = FALSE,
                           threads = NULL,
                           precision = c("double"),
-                          strategy = c("auto", "cheby", "lanczos")) {
+                          strategy = c("auto", "cheby", "lanczos", "exact")) {
   validate_signal_dims(g, signal)
   if (is.null(dim(signal))) signal <- matrix(signal, ncol = 1)
   precision <- match.arg(precision)
@@ -562,14 +575,34 @@ filter_signal <- function(g, signal, kernel, K = 30, lmax = NULL, jackson = FALS
 
   # Choose strategy
   if (strategy == "auto") {
-    if (!jackson && K >= 60) strategy <- "lanczos" else strategy <- "cheby"
+    if (filter_signal_exact_auto_ok(g)) {
+      strategy <- "exact"
+    } else if (!jackson && K >= 60) {
+      strategy <- "lanczos"
+    } else {
+      strategy <- "cheby"
+    }
   }
 
   if (strategy == "lanczos") {
     return(filter_signal_lanczos(g, signal, kernel, K = K))
   }
 
+  if (strategy == "exact") {
+    return(filter_signal_exact(g, signal, kernel, lmax = lmax))
+  }
+
   coeffs <- cheby_coeffs(kernel, K = K, lmax = lmax, jackson = jackson)
+  if (!isTRUE(g$normalized) && !isTRUE(g$directed) &&
+      !is.null(g$graph_type) && g$graph_type %in% c("ring", "path")) {
+    out <- chebyshev_filter_ring_cpp(
+      signal,
+      coeffs,
+      lmax,
+      periodic = identical(g$graph_type, "ring")
+    )
+    return(if (ncol(out) == 1) drop(out) else out)
+  }
   L_sp <- g$cache$laplacian_sp
   if (is.null(L_sp)) {
     L <- graph_laplacian(g, g$normalized)
@@ -578,6 +611,143 @@ filter_signal <- function(g, signal, kernel, K = 30, lmax = NULL, jackson = FALS
   }
   prec_flag <- if (precision == "float") 1L else 0L
   out <- chebyshev_filter_omp_cpp(L_sp, signal, coeffs, lmax, threads = threads %||% -1L, precision = prec_flag)
+  if (ncol(out) == 1) drop(out) else out
+}
+
+filter_signal_exact_auto_ok <- function(g) {
+  if (isTRUE(g$normalized) || isTRUE(g$directed)) {
+    return(FALSE)
+  }
+
+  if (identical(g$graph_type, "ring")) {
+    return(TRUE)
+  }
+
+  if (identical(g$graph_type, "path")) {
+    return(TRUE)
+  }
+
+  if (identical(g$graph_type, "grid2d")) {
+    return(!isTRUE(g$graph_params$periodic))
+  }
+
+  FALSE
+}
+
+path_dct_forward <- function(signal) {
+  if (is.null(dim(signal))) signal <- matrix(signal, ncol = 1)
+  n <- nrow(signal)
+  ext <- rbind(signal, signal[n:1, , drop = FALSE])
+  coeffs <- stats::mvfft(ext)
+  k <- 0:(n - 1)
+  phase <- exp((-1i * pi * k) / (2 * n))
+  out <- (sqrt(2 / n) / 2) * sweep(coeffs[1:n, , drop = FALSE], 1, phase, `*`)
+  out[1, ] <- out[1, ] / sqrt(2)
+  Re(out)
+}
+
+path_dct_inverse <- function(coeffs) {
+  if (is.null(dim(coeffs))) coeffs <- matrix(coeffs, ncol = 1)
+  n <- nrow(coeffs)
+  k <- 0:(n - 1)
+  phase <- exp((1i * pi * k) / (2 * n))
+  scaled <- coeffs
+  scaled[1, ] <- scaled[1, ] * sqrt(2)
+  spectrum <- (2 / sqrt(2 / n)) * sweep(scaled, 1, phase, `*`)
+  ext <- matrix(0 + 0i, nrow = 2 * n, ncol = ncol(coeffs))
+  ext[1:n, ] <- spectrum
+  if (n > 1) {
+    ext[(n + 2):(2 * n), ] <- Conj(spectrum[n:2, , drop = FALSE])
+  }
+  signal <- stats::mvfft(ext, inverse = TRUE) / (2 * n)
+  Re(signal[1:n, , drop = FALSE])
+}
+
+path_spectral_data <- function(n) {
+  j <- 0:(n - 1)
+  k <- 0:(n - 1)
+  U <- sqrt(2 / n) * cos(outer(j + 0.5, k) * pi / n)
+  U[, 1] <- U[, 1] / sqrt(2)
+  lambda <- 2 - 2 * cos(pi * k / n)
+  list(values = lambda, vectors = U)
+}
+
+grid2d_spectral_data <- function(nrow, ncol) {
+  row_spec <- path_spectral_data(nrow)
+  col_spec <- path_spectral_data(ncol)
+  list(
+    row_vectors = row_spec$vectors,
+    row_values = row_spec$values,
+    col_vectors = col_spec$vectors,
+    col_values = col_spec$values
+  )
+}
+
+#' Apply a spectral kernel exactly
+#'
+#' Uses graph-specific fast transforms where available and falls back to the
+#' eigendecomposition otherwise.
+#'
+#' @param g graph
+#' @param signal vector or matrix (n x m)
+#' @param kernel function of eigenvalues
+#' @param lmax optional spectral radius
+#' @return filtered signal (vector or matrix)
+#' @export
+filter_signal_exact <- function(g, signal, kernel, lmax = NULL) {
+  if (is.null(dim(signal))) signal <- matrix(signal, ncol = 1)
+
+  if (!isTRUE(g$normalized) && !isTRUE(g$directed) &&
+      identical(g$graph_type, "ring")) {
+    n <- nrow(signal)
+    idx <- 0:(n - 1)
+    lambda <- 2 - 2 * cos(2 * pi * idx / n)
+    H <- kernel(lambda)
+    Xhat <- stats::mvfft(signal)
+    Yhat <- sweep(Xhat, 1, H, `*`)
+    out <- stats::mvfft(Yhat, inverse = TRUE) / n
+    out <- Re(out)
+    return(if (ncol(out) == 1) drop(out) else out)
+  }
+
+  if (!isTRUE(g$normalized) && !isTRUE(g$directed) &&
+      identical(g$graph_type, "path")) {
+    n <- nrow(signal)
+    lambda <- 2 - 2 * cos(pi * (0:(n - 1)) / n)
+    coeffs <- path_dct_forward(signal)
+    out <- path_dct_inverse(kernel(lambda) * coeffs)
+    return(if (ncol(out) == 1) drop(out) else out)
+  }
+
+  if (!isTRUE(g$normalized) && !isTRUE(g$directed) &&
+      identical(g$graph_type, "grid2d") &&
+      !isTRUE(g$graph_params$periodic)) {
+    spec <- g$cache$grid2d_spec
+    if (is.null(spec)) {
+      spec <- grid2d_spectral_data(g$graph_params$nrow, g$graph_params$ncol)
+      g$cache$grid2d_spec <- spec
+    }
+    Ur <- spec$row_vectors
+    Uc <- spec$col_vectors
+    Hr <- spec$row_values
+    Hc <- spec$col_values
+    H <- outer(Hr, Hc, `+`)
+
+    out <- matrix(0, nrow = nrow(signal), ncol = ncol(signal))
+    for (i in seq_len(ncol(signal))) {
+      Xi <- matrix(signal[, i], nrow = g$graph_params$nrow, ncol = g$graph_params$ncol, byrow = TRUE)
+      Ci <- crossprod(Ur, Xi) %*% Uc
+      Yi <- Ur %*% (kernel(H) * Ci) %*% t(Uc)
+      out[, i] <- as.vector(t(Yi))
+    }
+    return(if (ncol(out) == 1) drop(out) else out)
+  }
+
+  eig <- graph_eigenpairs(g)
+  U <- eig$vectors
+  H <- kernel(eig$values)
+  coeffs <- t(U) %*% signal
+  out <- U %*% (H * coeffs)
   if (ncol(out) == 1) drop(out) else out
 }
 

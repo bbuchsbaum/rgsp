@@ -13,7 +13,7 @@ This directory contains benchmark scripts for measuring rgsp performance and com
 | `bench_filters.R` | General filter bank benchmarks |
 | `bench_threads.R` | OpenMP/BLAS thread scaling benchmarks |
 | `bench_tv.R` | Total variation optimization benchmarks |
-| `bench_pygsp_compare.R` | Side-by-side timing vs PyGSP (GFT/IGFT, heat filter) |
+| `bench_pygsp_compare.R` | Side-by-side timing vs PyGSP for ring/path/grid structured cases |
 | `bench_sparsify_spectral.R` | Spectral sparsification + downstream speedup benchmark |
 
 ## Running Benchmarks
@@ -61,40 +61,36 @@ pip install pygsp numpy
 Example one-off comparison (writes CSV when `BENCH_OUT` set):
 
 ```bash
-RETICULATE_PYTHON=.venv-pygsp/bin/python \
 BENCH_OUT=bench_pygsp.csv \
 Rscript inst/bench/bench_pygsp_compare.R
 ```
 
-The benchmark scripts automatically detect PyGSP availability and include comparisons when possible.
+`bench_pygsp_compare.R` loads the local working tree with `pkgload::load_all()` and
+automatically uses the vendored `./pygsp` when present, so it measures the code you
+are editing rather than an older installed package.
 
-## Typical Results
+## Interpreting Results
 
-### GFT/IGFT (Ring graph, n=512)
+Benchmark results are highly hardware-dependent and are sensitive to:
 
-| Operation | rgsp (ms) | PyGSP (ms) | Speedup |
-|-----------|-----------|------------|---------|
-| Eigenpairs | ~50 | ~80 | 1.6x |
-| GFT | ~2 | ~3 | 1.5x |
-| IGFT | ~2 | ~3 | 1.5x |
+- the active BLAS/LAPACK implementation used by R,
+- the Python and SciPy wheels backing PyGSP,
+- whether `reticulate` is pointed at the vendored `./pygsp` tree,
+- graph size, signal count, and approximation order.
 
-### Chebyshev Filtering (K=30, 4 signals)
+For that reason, this directory no longer publishes static "typical" speed tables.
+Use `bench_pygsp_compare.R`, `bench_gft.R`, and `bench_chebyshev.R` to generate
+measured results on the machine and toolchain you actually care about.
 
-| Graph Size | rgsp (ms) | PyGSP (ms) | Speedup |
-|------------|-----------|------------|---------|
-| n=128 | ~1.5 | ~3 | 2x |
-| n=512 | ~6 | ~15 | 2.5x |
-| n=2048 | ~45 | ~120 | 2.7x |
+The PyGSP comparison script now includes structured heat-filter cases for:
 
-### SGWT (4 scales)
+- `ring`, where `rgsp` can use an FFT-based exact path,
+- `path`, where `rgsp` can use a DCT/FFT-based exact path,
+- non-periodic `grid2d`, where `rgsp` can use a separable exact path,
+- generic `sensor`, `random_geometric`, and `sbm` graphs, all built from the exact same sparse adjacency in both libraries.
 
-| Graph Size | rgsp Analysis (ms) | rgsp Synthesis (ms) |
-|------------|-------------------|---------------------|
-| n=128 | ~4 | ~5 |
-| n=512 | ~15 | ~18 |
-| n=1024 | ~35 | ~40 |
-
-*Results vary based on hardware, BLAS implementation, and compiler optimizations.*
+The benchmark output now includes `rgsp_mad_ms` and `pygsp_mad_ms` columns so
+you can distinguish a real speed gap from timer noise.
 
 ## Performance Notes
 

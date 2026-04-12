@@ -507,13 +507,20 @@ test_that("cheby_coeffs caching works correctly", {
 
   # First call
   c1 <- rgsp:::cheby_coeffs(kernel, K = 20, lmax = lmax)
+  sz1 <- length(ls(envir = rgsp:::`.cheby_cache`))
 
   # Second call should hit cache
   c2 <- rgsp:::cheby_coeffs(kernel, K = 20, lmax = lmax)
+  sz2 <- length(ls(envir = rgsp:::`.cheby_cache`))
 
   expect_identical(c1, c2)
+  expect_equal(sz1, sz2)
 
-  # Different parameters should create new entry
+  # Different parameters create a separate cache entry, even if trimming
+  # makes the effective coefficient vector shorter than the requested K.
   c3 <- rgsp:::cheby_coeffs(kernel, K = 25, lmax = lmax)
-  expect_equal(length(c3), 25)
+  sz3 <- length(ls(envir = rgsp:::`.cheby_cache`))
+  expect_equal(sz3, sz2 + 1)
+  expect_true(length(c3) >= length(c1))
+  expect_true(length(c3) <= 25)
 })

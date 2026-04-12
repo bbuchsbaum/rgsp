@@ -95,7 +95,7 @@ test_that("cheby_cache_clear empties cache", {
   rgsp:::cheby_cache_clear()
   g <- graph_ring(5)
   x <- rnorm(5)
-  filter_signal(g, x, kernel_heat(0.3), K = 10)
+  filter_signal(g, x, kernel_heat(0.3), K = 10, strategy = "cheby")
   expect_true(length(ls(envir = rgsp:::`.cheby_cache`)) >= 1)
   cheby_cache_clear()
   expect_true(length(ls(envir = rgsp:::`.cheby_cache`)) == 0)

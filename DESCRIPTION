@@ -1,8 +1,8 @@
 Package: rgsp
 Type: Package
 Title: Graph Signal Processing Toolkit in R (Port of PyGSP)
-Version: 0.0.0.9000
-Authors@R: person(given = "Your", family = "Name", email = "you@example.com", role = c("aut", "cre"))
+Version: 0.2.1.9000
+Authors@R: person(given = "Brad", family = "Buchsbaum", email = "brad.buchsbaum@gmail.com", role = c("aut", "cre"))
 Description: Graph signal processing on graphs (construction, filters, spectral transforms,
     learning/optimization) ported from PyGSP 0.6.1 (EPFL LTS2, BSD-3-Clause; see
     inst/COPYRIGHTS). Core numerics implemented in C++ via RcppArmadillo with optional
@@ -29,7 +29,6 @@ Suggests:
     rgl,
     reticulate,
     bench,
-    microbenchmark,
     pkgdown
 LinkingTo:
     Rcpp,
@@ -39,4 +38,4 @@ Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 VignetteBuilder: knitr
-URL: https://github.com/yourname/rgsp
+URL: https://github.com/bbuchsbaum/rgsp

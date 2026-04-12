@@ -1,7 +1,7 @@
 # rgsp: Graph Signal Processing in R
 
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/yourname/rgsp/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/yourname/rgsp/actions/workflows/R-CMD-check.yaml)
+[![R-CMD-check](https://github.com/bbuchsbaum/rgsp/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/bbuchsbaum/rgsp/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
 **rgsp** is an R package for Graph Signal Processing (GSP), providing tools to analyze and process signals defined on graphs. It is a port of the Python [PyGSP](https://pygsp.readthedocs.io/) library with C++ acceleration via RcppArmadillo.
@@ -22,7 +22,7 @@
 ```r
 # Install from GitHub (development version)
 # install.packages("devtools")
-devtools::install_github("yourname/rgsp")
+devtools::install_github("bbuchsbaum/rgsp")
 ```
 
 ### Optional: enable PyGSP parity tests
