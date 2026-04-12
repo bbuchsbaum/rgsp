@@ -177,10 +177,11 @@ reference:
   - graph_save
   - graph_to_graphtool
   - graph_to_networkx
-  - title: Advanced APIs
-    desc: Directional transforms, additional filter banks, and helper functions
-    contents:
-    - abspline_filter_bank
+
+- title: Advanced APIs
+  desc: Directional transforms, additional filter banks, and helper functions
+  contents:
+  - abspline_filter_bank
   - classification_tikhonov_simplex
   - default_probe_block_cols
   - directional_wavelet_knn
@@ -193,19 +194,18 @@ reference:
   - graph_sparsify_spectral
   - graph_steerable_family
   - itersine_filter_bank
-  - knn_graph
-    - simpletight_filter_bank
-    - tree_multiresolution
-    - wavelet_heat_knn
+  - simpletight_filter_bank
+  - tree_multiresolution
+  - wavelet_heat_knn
 
-  - title: S3 Methods
-    desc: Print, summary, and plotting methods for structured outputs
-    contents:
-    - plot.sgwt_coeffs
-    - print.dsgwt_riesz
-    - print.dsgwt_steer
-    - print.sgwt_coeffs
-    - summary.sgwt_coeffs
+- title: S3 Methods
+  desc: Print, summary, and plotting methods for structured outputs
+  contents:
+  - plot.sgwt_coeffs
+  - print.dsgwt_riesz
+  - print.dsgwt_steer
+  - print.sgwt_coeffs
+  - summary.sgwt_coeffs
 articles:
 - title: Getting Started
   navbar: ~
