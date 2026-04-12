@@ -1,396 +1,212 @@
 ---
-title: "Graph Filters and Wavelets"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Graph Filters and Wavelets}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+title: Graph Filters and Wavelets
+output:
+  rmarkdown::html_vignette:
+    toc: yes
+    toc_depth: 2.0
+    css: albers.css
+    includes:
+      in_header: albers-header.html
+params:
+  family: red
+  preset: homage
+resource_files:
+- albers.css
+- albers.js
+- albers-header.html
+
+vignette: |
+  %\VignetteIndexEntry{Graph Filters and Wavelets} %\VignetteEngine{knitr::rmarkdown} %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
+```{r setup, include = FALSE}
+if (requireNamespace("ggplot2", quietly = TRUE) && requireNamespace("albersdown", quietly = TRUE)) ggplot2::theme_set(albersdown::theme_albers(family = params$family, preset = params$preset))
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
+  message = FALSE,
+  warning = FALSE,
   fig.width = 7,
   fig.height = 5
 )
-```
 
-```{r setup}
 library(rgsp)
+
 set.seed(42)
+has_ggplot2 <- requireNamespace("ggplot2", quietly = TRUE)
 ```
 
-## Overview
-
-Graph filtering is the core operation in graph signal processing. rgsp provides:
-
-- **Spectral kernels**: Functions that define filter response in the frequency domain
-- **Chebyshev approximation**: Fast polynomial filtering without eigendecomposition
-- **Filter banks**: Multiple filters applied simultaneously
-- **Wavelets**: Multi-scale analysis via SGWT
-
-## Spectral Filtering Basics
-
-A graph filter modifies a signal based on its spectral content. Given a signal $x$ and filter kernel $h(\lambda)$:
-
-$$y = h(L)x = U \cdot \text{diag}(h(\lambda_1), ..., h(\lambda_n)) \cdot U^T x$$
-
-where $L = U \Lambda U^T$ is the Laplacian eigendecomposition.
-
-### Direct vs Chebyshev Filtering
-
-**Direct filtering** requires full eigendecomposition - expensive for large graphs:
-
-```{r direct, eval=FALSE}
-# Compute eigenpairs (expensive for large n)
-eig <- graph_eigenpairs(g)
-# Apply filter in spectral domain
-y <- eig$vectors %*% diag(h(eig$values)) %*% t(eig$vectors) %*% x
-```
-**Chebyshev filtering** approximates $h(L)$ with polynomials - much faster:
-
-```{r chebyshev}
-g <- graph_ring(100)
-x <- rnorm(g$n)
-
-# Chebyshev approximation (default)
-y <- filter_signal(g, x, kernel_heat(1), K = 30)
+```{r albers-classes, echo=FALSE, results='asis'}
+cat(sprintf(
+  paste0(
+    '<script>document.addEventListener("DOMContentLoaded",function(){',
+    'document.body.classList.remove("palette-red","palette-lapis","palette-ochre","palette-teal","palette-green","palette-violet","preset-homage","preset-study","preset-structural","preset-adobe","preset-midnight");',
+    'document.body.classList.add("palette-%s","preset-%s");',
+    '});</script>'
+  ),
+  params$family,
+  params$preset
+))
 ```
 
-The parameter `K` controls accuracy (higher = more accurate but slower).
+Graph filtering is what you use when a node signal is easier to understand in terms of smooth versus local variation than in terms of raw adjacency entries. In `rgsp`, you define a spectral kernel, apply it with `filter_signal()`, and then inspect how the result changes across scales or bands.
 
-## Available Kernels
+This vignette uses one grid graph throughout so the effect of each filter remains visually interpretable.
 
-### Heat Kernel
+## What are we filtering?
 
-Smoothing filter: $h(\lambda) = e^{-\tau \lambda}$
+```{r build-grid}
+g <- graph_grid2d(16, 16)
+coords <- g$coords
 
-```{r kernel-heat}
-g <- graph_grid2d(10, 10)
-x <- numeric(g$n)
-x[45] <- 1  # Impulse at center
+impulse <- rep(0, g$n)
+impulse[121] <- 1
 
-# Different diffusion times
-y1 <- filter_signal(g, x, kernel_heat(0.5), K = 30)
-y2 <- filter_signal(g, x, kernel_heat(2.0), K = 30)
-y3 <- filter_signal(g, x, kernel_heat(5.0), K = 30)
-
-par(mfrow = c(1, 3))
-image(matrix(y1, 10, 10), main = "tau = 0.5")
-image(matrix(y2, 10, 10), main = "tau = 2.0")
-image(matrix(y3, 10, 10), main = "tau = 5.0")
+pattern <- sin(coords[, 1] / 2) + 0.4 * cos(coords[, 2]) + 0.2 * (-1)^coords[, 1]
+data.frame(nodes = g$n, edges = Matrix::nnzero(g$adjacency) / 2)
 ```
 
-### Mexican Hat Wavelet
+The `impulse` signal shows how a filter spreads information from one node to its neighbors. The `pattern` signal mixes smooth structure with faster oscillation.
 
-Band-pass filter centered at scale $\sigma$:
+## What does a heat filter do?
 
-```{r kernel-mexican}
-# Mexican hat at different scales
-k1 <- kernel_mexican_hat(0.5)
-k2 <- kernel_mexican_hat(1.0)
-k3 <- kernel_mexican_hat(2.0)
+```{r heat-filter}
+heat_small <- filter_signal(g, impulse, kernel_heat(0.2), K = 30)
+heat_large <- filter_signal(g, impulse, kernel_heat(1.2), K = 30)
 
-# Evaluate on spectrum
-lambda <- seq(0, 4, length.out = 100)
-plot(lambda, k1(lambda), type = "l", col = 1,
-     ylab = "Response", main = "Mexican Hat Kernels")
-lines(lambda, k2(lambda), col = 2)
-lines(lambda, k3(lambda), col = 3)
-legend("topright", c("sigma=0.5", "sigma=1", "sigma=2"), col = 1:3, lty = 1)
+data.frame(
+  tau = c(0.2, 1.2),
+  max_value = c(max(heat_small), max(heat_large)),
+  energy = c(sum(heat_small^2), sum(heat_large^2))
+)
 ```
 
-### Band-pass Filters
-
-```{r kernel-bandpass}
-# Rectangle (sharp cutoff)
-k_rect <- kernel_rectangle(1, 2)
-
-# Half-cosine (smooth transition)
-k_cos <- kernel_half_cosine(1, 2)
-
-# Meyer (infinitely smooth)
-k_meyer <- kernel_meyer(1, 2)
-
-lambda <- seq(0, 4, length.out = 200)
-plot(lambda, k_rect(lambda), type = "l", col = 1, ylim = c(0, 1.1),
-     ylab = "Response", main = "Band-pass Filters [1, 2]")
-lines(lambda, k_cos(lambda), col = 2)
-lines(lambda, k_meyer(lambda), col = 3)
-legend("topright", c("Rectangle", "Half-cosine", "Meyer"), col = 1:3, lty = 1)
+```{r check-heat-filter, include = FALSE}
+stopifnot(
+  all(is.finite(heat_small)),
+  all(is.finite(heat_large)),
+  max(heat_large) < max(heat_small)
+)
 ```
 
-### Other Kernels
+A small diffusion time keeps the impulse localized. A larger diffusion time spreads the same mass more broadly over the graph.
 
-```{r other-kernels, eval=FALSE}
-kernel_exponential(tau)    # Exponential: tau * lambda * exp(-tau * lambda)
-kernel_gabor(center, sigma) # Gabor: localized in frequency
-kernel_wave(speed)          # Wave equation kernel
-kernel_tight_band(a, b)     # Tight frame band-pass
+```{r plot-heat-small, eval = has_ggplot2}
+plot_signal(g, heat_small, title = "Heat filter with tau = 0.2")
 ```
 
-## Filter Banks
+```{r plot-heat-large, eval = has_ggplot2}
+plot_signal(g, heat_large, title = "Heat filter with tau = 1.2")
+```
 
-Apply multiple filters simultaneously:
+## How do different kernels behave in frequency?
+
+```{r compare-kernels}
+kernels <- list(
+  Heat = kernel_heat(0.5),
+  MexicanHat = kernel_mexican_hat(1),
+  BandPass = kernel_half_cosine(0.8, 2.2)
+)
+
+data.frame(
+  kernel = names(kernels),
+  response_at_zero = vapply(kernels, function(k) k(0), numeric(1)),
+  response_at_lmax = vapply(kernels, function(k) k(lambda_max(g)), numeric(1))
+)
+```
+
+```{r plot-filter-response, eval = has_ggplot2}
+plot_filter_response(
+  kernels,
+  lmax = lambda_max(g),
+  title = "Spectral responses of three common kernels"
+)
+```
+
+The heat kernel is low-pass, the Mexican hat emphasizes an interior band, and the half-cosine kernel makes the band limits explicit.
+
+## How do filter banks split a signal?
 
 ```{r filter-bank}
-g <- graph_ring(64)
-x <- rnorm(g$n)
-
-# Define filter bank
 bank <- list(
-  lowpass = kernel_rectangle(0, 1),
-  midpass = kernel_half_cosine(1, 2.5),
-  highpass = kernel_rectangle(2.5, 4)
+  lowpass = kernel_rectangle(0, 0.8),
+  midpass = kernel_half_cosine(0.8, 1.8),
+  highpass = kernel_rectangle(1.8, lambda_max(g))
 )
 
-# Apply all filters
-results <- filter_bank_apply(g, x, bank, K = 40)
-str(results)
-```
-
-### Wavelet Banks
-
-Pre-defined wavelet filter banks:
-
-```{r wavelet-banks}
-g <- graph_sensor(50, seed = 42)
-
-# Mexican hat wavelets (4 scales)
-bank_mh <- mexican_hat_wavelet_bank(g, n_scales = 4)
-
-# Meyer wavelets
-bank_meyer <- meyer_wavelet_bank(g, n_scales = 4)
-
-# Heat diffusion wavelets (requires explicit scales)
-bank_heat <- wavelet_heat_bank(scales = c(1, 2, 4, 8))
-
-cat("Mexican hat bank:", length(bank_mh), "filters\n")
-cat("Meyer bank:", length(bank_meyer), "filters\n")
-```
-
-### Tight Frame Banks
-
-Tight frames ensure perfect reconstruction with $A = B$ (frame bounds equal):
-
-```{r tight-frames}
-g <- graph_ring(32)
-
-# Different tight frame constructions
-tf_regular <- tight_frame_regular(g)
-tf_held <- tight_frame_held(g)
-tf_simoncelli <- tight_frame_simoncelli(g)
-tf_papadakis <- tight_frame_papadakis(g)
-
-cat("Regular:", length(tf_regular), "filters\n")
-cat("Held:", length(tf_held), "filters\n")
-cat("Simoncelli:", length(tf_simoncelli), "filters\n")
-cat("Papadakis:", length(tf_papadakis), "filters\n")
-```
-
-## Spectral Graph Wavelet Transform (SGWT)
-
-The SGWT provides multi-scale analysis:
-
-```{r sgwt-basic}
-g <- graph_sensor(100, seed = 42)
-set.seed(42)
-x <- rnorm(g$n)
-
-# Forward transform with 4 scales
-W <- sgwt(g, x, scales = 4)
-print(W)
-
-# Access coefficients by scale
-# Use "lowpass" for lowpass band, or numeric scale values for wavelet bands
-lowpass_coeffs <- sgwt_coeffs_at_scale(W, "lowpass")
-# Access a wavelet scale (use W$scales to see available scale values)
-cat("Available scales:", W$scales, "\n")
-scale1_coeffs <- sgwt_coeffs_at_scale(W, W$scales[1])
-
-# Inverse transform
-x_rec <- isgwt(W)
-max(abs(x - x_rec))  # Perfect reconstruction
-```
-
-### Analyzing Wavelet Coefficients
-
-```{r sgwt-analysis}
-# Energy by scale
-energy <- band_energy_df(W)
-print(energy)
-
-# Tidy format for analysis
-tidy_df <- sgwt_coeffs_tidy(W)
-head(tidy_df)
-```
-
-### Selective Reconstruction
-
-Reconstruct using only certain scales:
-
-```{r selective-recon}
-# Reconstruct from wavelets only (exclude lowpass)
-x_wavelets <- isgwt(W, bands = "wavelets")
-
-# Reconstruct from lowpass only
-x_lowpass <- isgwt(W, bands = "lowpass")
-
-# Exclude lowpass using string identifier
-x_no_lowpass <- isgwt(W, exclude_bands = "lowpass")
-```
-
-### Node-level Analysis
-
-```{r node-analysis}
-# Wavelet atom at specific node (takes graph, not W)
-# Use one of the scales from W$scales
-atom <- sgwt_atom(g, node = 50, scale = W$scales[1])
-
-# Per-node contribution across scales (all nodes)
-contrib <- sgwt_node_contribution(W)
-# Show contribution for node 50
-cat("Contribution for node 50:\n")
-print(contrib[50, ])
-```
-
-## Heat Propagation
-
-Simulate diffusion on the graph:
-
-```{r heat-propagate}
-g <- graph_grid2d(15, 15)
-x0 <- numeric(g$n)
-x0[112] <- 1  # Initial heat at center
-
-# Propagate at multiple times (returns a list)
-times <- c(0.5, 1, 2, 5)
-heat <- heat_propagate(g, x0, t = times, K = 50)
-
-par(mfrow = c(2, 2))
-for (i in seq_along(times)) {
-  image(matrix(heat[[i]], 15, 15), main = paste("t =", times[i]))
-}
-```
-
-## Frame Analysis
-
-Compute frame bounds to verify filter bank quality:
-
-```{r frame-bounds}
-g <- graph_ring(32)
-kernels <- mexican_hat_wavelet_bank(g, n_scales = 4)
-
-# Compute frame bounds
-frame <- compute_frame(g, kernels, method = "exact")
-cat("Lower bound A:", round(frame$A, 4), "\n")
-cat("Upper bound B:", round(frame$B, 4), "\n")
-cat("Condition number B/A:", round(frame$B / frame$A, 4), "\n")
-```
-
-A tight frame has $A \approx B$.
-
-## Spectrogram
-
-Vertex-frequency analysis:
-
-```{r spectrogram}
-g <- graph_ring(50)
-x <- sin(seq(0, 4*pi, length.out = g$n)) + 0.5 * cos(seq(0, 8*pi, length.out = g$n))
-
-# Compute spectrogram
-spec <- compute_spectrogram(g, x, scales = c(0.5, 1, 2, 4, 8))
-dim(spec)  # nodes x scales
-```
-
-## Visualization
-
-```{r viz, eval=requireNamespace("ggplot2", quietly = TRUE)}
-library(ggplot2)
-
-# Filter response plot
-kernels <- list(
-  Heat_1 = kernel_heat(1),
-  Heat_5 = kernel_heat(5),
-  MexicanHat = kernel_mexican_hat(1)
+parts <- filter_bank_apply(g, pattern, bank, K = 40)
+band_summary <- data.frame(
+  band = names(parts),
+  energy = vapply(parts, function(z) mean(z^2), numeric(1))
 )
-plot_filter_response(kernels, lmax = 4)
+band_summary
 ```
 
-```{r viz-wavelet, eval=requireNamespace("ggplot2", quietly = TRUE)}
-# Wavelet coefficient heatmap
-g <- graph_ring(30)
-W <- sgwt(g, sin(seq(0, 2*pi, length.out = 30)), scales = 4)
-plot_wavelet_coeffs(W)
+```{r check-filter-bank, include = FALSE}
+stopifnot(
+  all(vapply(parts, function(z) all(is.finite(z)), logical(1))),
+  all(band_summary$energy > 0)
+)
 ```
 
-```{r viz-energy, eval=requireNamespace("ggplot2", quietly = TRUE)}
-# Energy distribution
-plot_band_energy(W)
+This is the practical use of a filter bank: you get separate signals for broad trend, intermediate structure, and fine detail.
+
+```{r plot-lowpass, eval = has_ggplot2}
+plot_signal(g, parts$lowpass, title = "Low-pass component")
 ```
 
-## Performance Considerations
-
-### Chebyshev Order K
-
-- **K = 20-30**: Fast, good for smooth kernels
-- **K = 50**: Good balance for most applications
-- **K = 100+**: High accuracy, slower
-
-```{r K-comparison}
-g <- graph_ring(100)
-x <- rnorm(g$n)
-kernel <- kernel_heat(1)
-
-# Compare different K values
-y30 <- filter_signal(g, x, kernel, K = 30)
-y50 <- filter_signal(g, x, kernel, K = 50)
-y100 <- filter_signal(g, x, kernel, K = 100)
-
-# Difference from high-accuracy result
-cat("K=30 vs K=100 max diff:", max(abs(y30 - y100)), "\n")
-cat("K=50 vs K=100 max diff:", max(abs(y50 - y100)), "\n")
+```{r plot-highpass, eval = has_ggplot2}
+plot_signal(g, parts$highpass, title = "High-pass component")
 ```
 
-### Caching
+## How do graph wavelets add scale?
 
-Chebyshev coefficients are cached automatically:
-
-```{r caching}
-g <- graph_ring(100)
-x <- rnorm(g$n)
-kernel <- kernel_heat(1)
-
-# First call computes coefficients
-system.time(filter_signal(g, x, kernel, K = 50))
-
-# Second call uses cache
-system.time(filter_signal(g, x, kernel, K = 50))
-
-# Clear cache if needed
-cheby_cache_clear()
+```{r wavelet-analysis}
+W <- sgwt(g, pattern, wavelet = "heat", scales = c(0.5, 1, 2, 4), K = 30)
+energy_df <- band_energy_df(W)
+energy_df[, c("band", "pct")]
 ```
 
-### Lanczos Alternative
-
-For ill-conditioned problems, try Lanczos filtering:
-
-```{r lanczos}
-g <- graph_ring(100)
-x <- rnorm(g$n)
-
-# Lanczos-based filtering
-y_lanczos <- filter_signal_lanczos(g, x, kernel_heat(1), K = 30)
+```{r check-wavelet-analysis, include = FALSE}
+pattern_rec <- isgwt(W, method = "iterative", tol = 1e-8, maxiter = 200)
+stopifnot(
+  all(is.finite(W$coeffs)),
+  max(abs(pattern_rec - pattern)) < 1e-4
+)
 ```
 
-## Summary
+Wavelets go beyond a three-band filter bank because they let you see how much structure lives at each scale, node by node.
 
-| Task | Function | Key Parameters |
-|------|----------|----------------|
-| Single filter | `filter_signal()` | `kernel`, `K` |
-| Multiple filters | `filter_bank_apply()` | `bank`, `K` |
-| Wavelets | `sgwt()`, `isgwt()` | `scales` |
-| Heat diffusion | `heat_propagate()` | `t`, `K` |
-| Frame analysis | `compute_frame()` | `method` |
-| Spectrogram | `compute_spectrogram()` | `scales` |
+```{r plot-band-energy, eval = has_ggplot2}
+plot_band_energy(W, title = "Wavelet energy by band")
+```
+
+```{r plot-wavelet-heatmap, eval = has_ggplot2}
+plot_wavelet_coeffs(W, title = "Wavelet coefficients on the grid signal")
+```
+
+## When should you care about `strategy`?
+
+For most users, `filter_signal()` with `strategy = "auto"` is the right default. It chooses a fast exact path on structured graphs such as rings, paths, and 2D grids, and otherwise falls back to polynomial filtering.
+
+```{r strategy-check}
+y_auto <- filter_signal(g, pattern, kernel_heat(0.4), strategy = "auto")
+y_exact <- filter_signal_exact(g, pattern, kernel_heat(0.4))
+
+data.frame(
+  max_abs_difference = signif(max(abs(y_auto - y_exact)), 3)
+)
+```
+
+```{r check-strategy, include = FALSE}
+stopifnot(max(abs(y_auto - y_exact)) < 1e-8)
+```
+
+That means you can usually start with the default and only think about the approximation method when you are profiling or comparing algorithms.
+
+## What should you use next?
+
+- Use `filter_signal()` for one kernel and one task such as smoothing or band isolation.
+- Use `filter_bank_apply()` when you want multiple components at once.
+- Use `sgwt()` and `isgwt()` when scale-localized analysis matters more than a single filtered output.
+- Use `plot_filter_response()` and `plot_wavelet_coeffs()` when you need to explain a kernel choice to yourself or someone else.
