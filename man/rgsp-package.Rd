@@ -11,7 +11,9 @@ Core graph signal processing algorithms with C++ acceleration via RcppArmadillo.
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://bbuchsbaum.github.io/rgsp/}
   \item \url{https://github.com/bbuchsbaum/rgsp}
+  \item Report bugs at \url{https://github.com/bbuchsbaum/rgsp/issues}
 }
 
 }

@@ -491,26 +491,60 @@ plot_filter_response <- function(kernels,
     filter = rep(paste0("g", seq_len(n_filters)), each = n)
   )
 
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$lambda, y = .data$response))
+  sum_label <- "sum of squares"
+  filter_levels <- unique(df$filter)
 
-  if (labels) {
-    p <- p + ggplot2::geom_line(ggplot2::aes(color = .data$filter), alpha = 0.7)
-  } else {
-    p <- p + ggplot2::geom_line(ggplot2::aes(group = .data$filter), alpha = 0.7,
-                                 color = "steelblue")
-  }
-
-  # Add sum of squares
-  if (show_sum) {
+  if (labels && show_sum) {
     sum_sq <- rowSums(responses^2)
-    sum_df <- data.frame(lambda = lambda, sum_sq = sum_sq)
-    p <- p + ggplot2::geom_line(
-      data = sum_df,
-      ggplot2::aes(x = .data$lambda, y = .data$sum_sq),
-      color = "black",
-      linewidth = 1,
-      linetype = "dashed"
+    combined <- rbind(
+      data.frame(lambda = df$lambda, response = df$response,
+                 series = df$filter, stringsAsFactors = FALSE),
+      data.frame(lambda = lambda, response = sum_sq,
+                 series = sum_label, stringsAsFactors = FALSE)
     )
+    combined$series <- factor(combined$series,
+                              levels = c(filter_levels, sum_label))
+    n_filters_unique <- length(filter_levels)
+    color_vals <- stats::setNames(
+      c(scales::hue_pal()(n_filters_unique), "black"),
+      c(filter_levels, sum_label)
+    )
+    linetype_vals <- stats::setNames(
+      c(rep("solid", n_filters_unique), "dashed"),
+      c(filter_levels, sum_label)
+    )
+    linewidth_vals <- stats::setNames(
+      c(rep(0.7, n_filters_unique), 0.9),
+      c(filter_levels, sum_label)
+    )
+    p <- ggplot2::ggplot(combined,
+      ggplot2::aes(x = .data$lambda, y = .data$response,
+                   color = .data$series, linetype = .data$series,
+                   linewidth = .data$series)) +
+      ggplot2::geom_line(alpha = 0.85) +
+      ggplot2::scale_color_manual(values = color_vals, name = NULL) +
+      ggplot2::scale_linetype_manual(values = linetype_vals, name = NULL) +
+      ggplot2::scale_linewidth_manual(values = linewidth_vals, name = NULL,
+                                      guide = "none")
+  } else if (labels) {
+    p <- ggplot2::ggplot(df,
+      ggplot2::aes(x = .data$lambda, y = .data$response,
+                   color = .data$filter)) +
+      ggplot2::geom_line(alpha = 0.85, linewidth = 0.7) +
+      ggplot2::labs(color = NULL)
+  } else {
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$lambda, y = .data$response)) +
+      ggplot2::geom_line(ggplot2::aes(group = .data$filter), alpha = 0.7,
+                         color = "steelblue")
+    if (show_sum) {
+      sum_sq <- rowSums(responses^2)
+      sum_df <- data.frame(lambda = lambda, response = sum_sq)
+      p <- p + ggplot2::geom_line(
+        data = sum_df,
+        ggplot2::aes(x = .data$lambda, y = .data$response),
+        color = "black", linewidth = 0.9, linetype = "dashed"
+      )
+    }
   }
 
   # Add eigenvalue markers if provided

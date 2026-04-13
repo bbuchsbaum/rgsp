@@ -119,6 +119,7 @@ data.frame(
 plot_filter_response(
   kernels,
   lmax = lambda_max(g),
+  show_sum = FALSE,
   title = "Spectral responses of three common kernels"
 )
 ```
